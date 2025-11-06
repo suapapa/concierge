@@ -21,7 +21,12 @@ func withFileLock(fn func() error) error {
 	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX); err != nil {
 		return fmt.Errorf("failed to acquire file lock: %w", err)
 	}
-	defer syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
+	defer func() {
+		if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN); err != nil {
+			// Unlock 실패는 로그만 남김 (이미 함수가 종료되므로)
+			fmt.Printf("warning: failed to release file lock: %v\n", err)
+		}
+	}()
 
 	// 함수 실행
 	return fn()

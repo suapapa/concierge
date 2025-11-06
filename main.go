@@ -47,7 +47,10 @@ func main() {
 	flag.StringVar(&flagPort, "p", flagPort, "port")
 	flag.Parse()
 
-	os.MkdirAll(flagTmpDir, 0755)
+	if err := os.MkdirAll(flagTmpDir, 0755); err != nil {
+		fmt.Printf("error: failed to create temporary directory: %v\n", err)
+		os.Exit(1)
+	}
 
 	// activeRefs 파일 경로 설정
 	activeRefsFile = filepath.Join(flagTmpDir, "active_refs.yaml")
@@ -153,13 +156,17 @@ func main() {
 					refCount, err := getActiveRefCount(key)
 					if err != nil || refCount == 0 {
 						os.RemoveAll(keyDir)
-						deleteActiveRef(key)
+						if err := deleteActiveRef(key); err != nil {
+							fmt.Printf("warning: failed to delete active ref for key %s: %v\n", key, err)
+						}
 						return
 					}
 				}
 			} else {
 				os.RemoveAll(keyDir)
-				deleteActiveRef(key)
+				if err := deleteActiveRef(key); err != nil {
+					fmt.Printf("warning: failed to delete active ref for key %s: %v\n", key, err)
+				}
 			}
 		}()
 
@@ -218,5 +225,8 @@ func main() {
 		c.File(filePath)
 	})
 
-	r.Run(":" + flagPort)
+	if err := r.Run(":" + flagPort); err != nil {
+		fmt.Printf("error: failed to start server: %v\n", err)
+		os.Exit(1)
+	}
 }
