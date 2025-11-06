@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -18,6 +19,8 @@ var (
 	flagTmpDir    = "/tmp/concierge"
 	flagSizeLimit = 1024 * 1024 * 5 // 5MB
 	flagPort      = "8080"
+	// 활성 파일 참조 추적 (키 -> 활성 참조 수)
+	activeRefs sync.Map
 )
 
 type SaveResponse struct {
@@ -131,9 +134,25 @@ func main() {
 		}
 
 		// TTL이 지나면 디렉터리 전체 삭제 (goroutine으로 처리)
+		// 활성 참조가 없을 때만 삭제
 		go func() {
 			time.Sleep(time.Duration(ttlMinutes) * time.Minute)
-			os.RemoveAll(keyDir)
+			// 활성 참조가 있는지 확인
+			if refCount, exists := activeRefs.Load(key); exists && refCount.(int) > 0 {
+				// 활성 참조가 있으면 삭제를 지연 (1초마다 재확인)
+				ticker := time.NewTicker(1 * time.Second)
+				defer ticker.Stop()
+				for range ticker.C {
+					if refCount, exists := activeRefs.Load(key); !exists || refCount.(int) == 0 {
+						os.RemoveAll(keyDir)
+						activeRefs.Delete(key)
+						return
+					}
+				}
+			} else {
+				os.RemoveAll(keyDir)
+				activeRefs.Delete(key)
+			}
 		}()
 
 		c.JSON(200, SaveResponse{Key: key})
@@ -168,6 +187,22 @@ func main() {
 			c.JSON(404, gin.H{"error": "file not found"})
 			return
 		}
+
+		// 활성 참조 증가 (파일 전송 중 삭제 방지)
+		refCount, _ := activeRefs.LoadOrStore(key, 0)
+		activeRefs.Store(key, refCount.(int)+1)
+
+		// 파일 전송 완료 후 참조 감소
+		defer func() {
+			if refCount, exists := activeRefs.Load(key); exists {
+				newCount := refCount.(int) - 1
+				if newCount <= 0 {
+					activeRefs.Delete(key)
+				} else {
+					activeRefs.Store(key, newCount)
+				}
+			}
+		}()
 
 		// MIME 타입 설정
 		if info.MimeType != "" {
