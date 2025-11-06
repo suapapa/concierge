@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -19,8 +18,10 @@ var (
 	flagTmpDir    = "/tmp/concierge"
 	flagSizeLimit = 1024 * 1024 * 5 // 5MB
 	flagPort      = "8080"
-	// 활성 파일 참조 추적 (키 -> 활성 참조 수)
-	activeRefs sync.Map
+	// 활성 파일 참조 추적 파일 경로
+	activeRefsFile string
+	// 락 파일 경로
+	activeRefsLockFile string
 )
 
 type SaveResponse struct {
@@ -47,6 +48,11 @@ func main() {
 	flag.Parse()
 
 	os.MkdirAll(flagTmpDir, 0755)
+
+	// activeRefs 파일 경로 설정
+	activeRefsFile = filepath.Join(flagTmpDir, "active_refs.yaml")
+	// 락 파일 경로 설정
+	activeRefsLockFile = filepath.Join(flagTmpDir, "active_refs.lock")
 
 	r := gin.Default()
 
@@ -138,20 +144,22 @@ func main() {
 		go func() {
 			time.Sleep(time.Duration(ttlMinutes) * time.Minute)
 			// 활성 참조가 있는지 확인
-			if refCount, exists := activeRefs.Load(key); exists && refCount.(int) > 0 {
+			refCount, err := getActiveRefCount(key)
+			if err == nil && refCount > 0 {
 				// 활성 참조가 있으면 삭제를 지연 (1초마다 재확인)
 				ticker := time.NewTicker(1 * time.Second)
 				defer ticker.Stop()
 				for range ticker.C {
-					if refCount, exists := activeRefs.Load(key); !exists || refCount.(int) == 0 {
+					refCount, err := getActiveRefCount(key)
+					if err != nil || refCount == 0 {
 						os.RemoveAll(keyDir)
-						activeRefs.Delete(key)
+						deleteActiveRef(key)
 						return
 					}
 				}
 			} else {
 				os.RemoveAll(keyDir)
-				activeRefs.Delete(key)
+				deleteActiveRef(key)
 			}
 		}()
 
@@ -189,18 +197,15 @@ func main() {
 		}
 
 		// 활성 참조 증가 (파일 전송 중 삭제 방지)
-		refCount, _ := activeRefs.LoadOrStore(key, 0)
-		activeRefs.Store(key, refCount.(int)+1)
+		if err := incrementActiveRef(key); err != nil {
+			// 참조 증가 실패는 로그만 남기고 계속 진행
+			fmt.Printf("warning: failed to increment active ref for key %s: %v\n", key, err)
+		}
 
 		// 파일 전송 완료 후 참조 감소
 		defer func() {
-			if refCount, exists := activeRefs.Load(key); exists {
-				newCount := refCount.(int) - 1
-				if newCount <= 0 {
-					activeRefs.Delete(key)
-				} else {
-					activeRefs.Store(key, newCount)
-				}
+			if err := decrementActiveRef(key); err != nil {
+				fmt.Printf("warning: failed to decrement active ref for key %s: %v\n", key, err)
 			}
 		}()
 
