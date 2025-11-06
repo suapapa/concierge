@@ -11,12 +11,22 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/goccy/go-yaml"
 )
 
-var flagTmpDir = "/tmp/concierge"
+var (
+	flagTmpDir    = "/tmp/concierge"
+	flagSizeLimit = 1024 * 1024 * 5 // 5MB
+	flagPort      = "8080"
+)
 
 type SaveResponse struct {
 	Key string `json:"key"`
+}
+
+type FileInfo struct {
+	MimeType string `yaml:"mimeType"`
+	Filename string `yaml:"filename"`
 }
 
 func generateKey() (string, error) {
@@ -29,6 +39,8 @@ func generateKey() (string, error) {
 
 func main() {
 	flag.StringVar(&flagTmpDir, "t", flagTmpDir, "temporary directory")
+	flag.IntVar(&flagSizeLimit, "l", flagSizeLimit, "size limit")
+	flag.StringVar(&flagPort, "p", flagPort, "port")
 	flag.Parse()
 
 	os.MkdirAll(flagTmpDir, 0755)
@@ -40,6 +52,12 @@ func main() {
 		file, err := c.FormFile("file")
 		if err != nil {
 			c.JSON(400, gin.H{"error": "file is required"})
+			return
+		}
+
+		// 파일 크기 제한 확인
+		if file.Size > int64(flagSizeLimit) {
+			c.JSON(400, gin.H{"error": fmt.Sprintf("file size exceeds limit: %d bytes (max: %d bytes)", file.Size, flagSizeLimit)})
 			return
 		}
 
@@ -64,6 +82,13 @@ func main() {
 			return
 		}
 
+		// 키별 디렉터리 생성
+		keyDir := filepath.Join(flagTmpDir, key)
+		if err := os.MkdirAll(keyDir, 0755); err != nil {
+			c.JSON(500, gin.H{"error": "failed to create directory"})
+			return
+		}
+
 		// 파일 저장
 		src, err := file.Open()
 		if err != nil {
@@ -72,10 +97,9 @@ func main() {
 		}
 		defer src.Close()
 
-		// 파일 확장자 유지
-		ext := filepath.Ext(file.Filename)
-		filename := key + ext
-		filePath := filepath.Join(flagTmpDir, filename)
+		// 원본 파일명 사용
+		filename := file.Filename
+		filePath := filepath.Join(keyDir, filename)
 
 		dst, err := os.Create(filePath)
 		if err != nil {
@@ -89,14 +113,27 @@ func main() {
 			return
 		}
 
-		// MIME 타입을 파일명이나 메타데이터로 저장할 수도 있지만,
-		// 지금은 파일만 저장하고 키만 반환
-		// 필요시 나중에 메타데이터 파일을 별도로 저장할 수 있음
+		// info.yaml에 메타데이터 저장
+		info := FileInfo{
+			MimeType: mimeType,
+			Filename: filename,
+		}
+		infoData, err := yaml.Marshal(info)
+		if err != nil {
+			c.JSON(500, gin.H{"error": "failed to marshal info"})
+			return
+		}
 
-		// TTL이 지나면 파일 삭제 (goroutine으로 처리)
+		infoPath := filepath.Join(keyDir, "info.yaml")
+		if err := os.WriteFile(infoPath, infoData, 0644); err != nil {
+			c.JSON(500, gin.H{"error": "failed to save info.yaml"})
+			return
+		}
+
+		// TTL이 지나면 디렉터리 전체 삭제 (goroutine으로 처리)
 		go func() {
 			time.Sleep(time.Duration(ttlMinutes) * time.Minute)
-			os.Remove(filePath)
+			os.RemoveAll(keyDir)
 		}()
 
 		c.JSON(200, SaveResponse{Key: key})
@@ -109,31 +146,37 @@ func main() {
 			return
 		}
 
-		// 키로 시작하는 파일 찾기 (확장자 포함)
-		pattern := filepath.Join(flagTmpDir, key+"*")
-		matches, err := filepath.Glob(pattern)
-		if err != nil {
-			c.JSON(500, gin.H{"error": "failed to search file"})
-			return
-		}
+		keyDir := filepath.Join(flagTmpDir, key)
+		infoPath := filepath.Join(keyDir, "info.yaml")
 
-		if len(matches) == 0 {
+		// info.yaml 읽기
+		infoData, err := os.ReadFile(infoPath)
+		if err != nil {
 			c.JSON(404, gin.H{"error": "file not found"})
 			return
 		}
 
-		// 첫 번째 매칭 파일 사용
-		filePath := matches[0]
+		var info FileInfo
+		if err := yaml.Unmarshal(infoData, &info); err != nil {
+			c.JSON(500, gin.H{"error": "failed to parse info.yaml"})
+			return
+		}
 
-		// 파일 존재 확인
+		// 파일 경로 확인
+		filePath := filepath.Join(keyDir, info.Filename)
 		if _, err := os.Stat(filePath); os.IsNotExist(err) {
 			c.JSON(404, gin.H{"error": "file not found"})
 			return
+		}
+
+		// MIME 타입 설정
+		if info.MimeType != "" {
+			c.Header("Content-Type", info.MimeType)
 		}
 
 		// 파일 전송
 		c.File(filePath)
 	})
 
-	r.Run(":8080")
+	r.Run(":" + flagPort)
 }
