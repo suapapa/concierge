@@ -265,8 +265,8 @@ func main() {
 			c.Header("Content-Type", info.MimeType)
 		}
 
-		// 파일 전송
-		c.File(filePath)
+		// 파일 전송 (원본 파일명으로 다운로드)
+		c.FileAttachment(filePath, info.Filename)
 	})
 
 	r.GET("/health", func(c *gin.Context) {
