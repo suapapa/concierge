@@ -6,8 +6,8 @@
 // @contact.url    https://github.com/suapapa
 // @contact.email  ff4500@gmail.com
 
-// @license.name  Apache 2.0
-// @license.url   http://www.apache.org/licenses/LICENSE-2.0.html
+// @license.name  MIT
+// @license.url   https://opensource.org/licenses/MIT
 
 // @host      localhost:8080
 // @BasePath  /
