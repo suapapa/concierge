@@ -48,17 +48,17 @@ docker build -t concierge .
 
 ```sh
 # Basic upload (default TTL: 3 minutes)
-curl -X POST http://localhost:8080/save \
+curl -X POST http://localhost:8080/luggage \
   -F "file=@example.txt"
 
 # Upload with custom MIME type and TTL
-curl -X POST http://localhost:8080/save \
+curl -X POST http://localhost:8080/luggage \
   -F "file=@example.txt" \
   -F "mime=text/plain" \
   -F "ttl=5"
 
 # Upload an image with 10 minute TTL
-curl -X POST http://localhost:8080/save \
+curl -X POST http://localhost:8080/luggage \
   -F "file=@image.png" \
   -F "mime=image/png" \
   -F "ttl=10"
@@ -75,10 +75,10 @@ curl -X POST http://localhost:8080/save \
 
 ```sh
 # Download using the key from upload response
-curl http://localhost:8080/fetch/a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6 -o downloaded.txt
+curl http://localhost:8080/luggage/a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6 -o downloaded.txt
 
 # Or open in browser
-open http://localhost:8080/fetch/a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6
+open http://localhost:8080/luggage/a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6
 ```
 
 ### Complete example
@@ -88,7 +88,7 @@ open http://localhost:8080/fetch/a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6
 ./concierge
 
 # 2. Upload a file
-KEY=$(curl -s -X POST http://localhost:8080/save \
+KEY=$(curl -s -X POST http://localhost:8080/luggage \
   -F "file=@document.pdf" \
   -F "mime=application/pdf" \
   -F "ttl=15" | jq -r '.key')
@@ -96,48 +96,15 @@ KEY=$(curl -s -X POST http://localhost:8080/save \
 echo "File uploaded! Key: $KEY"
 
 # 3. Share the URL
-echo "Share this URL: http://localhost:8080/fetch/$KEY"
+echo "Share this URL: http://localhost:8080/luggage/$KEY"
 
 # 4. Download the file
-curl http://localhost:8080/fetch/$KEY -o downloaded.pdf
+curl http://localhost:8080/luggage/$KEY -o downloaded.pdf
 ```
-
-## API Endpoints
-
-### POST /save
-
-Upload a file for temporary hosting.
-
-**Form parameters:**
-- `file` (required): The file to upload
-- `mime` (optional): MIME type (defaults to Content-Type header)
-- `ttl` (optional): Time-to-live in minutes (default: 3)
-
-**Response:**
-```json
-{
-  "key": "unique-key-string"
-}
-```
-
-**Error responses:**
-- `400`: Missing file or file size exceeds limit
-- `500`: Server error (key generation, file save, etc.)
-
-### GET /fetch/:key
-
-Retrieve a file by its key.
-
-**Path parameters:**
-- `key` (required): The file key returned from `/save`
-
-**Response:**
-- `200`: File content with appropriate Content-Type header
-- `404`: File not found or expired
 
 ## How it works
 
-1. When you upload a file via `/save`, it generates a unique key and stores the file in a temporary directory
+1. When you upload a file via `/luggage` (POST), it generates a unique key and stores the file in a temporary directory
 2. The file metadata (MIME type, filename) is stored in `info.yaml` alongside the file
 3. A background goroutine waits for the TTL period, then checks if there are any active downloads
 4. If no active references exist, the file is deleted. If downloads are in progress, deletion is delayed until all downloads complete

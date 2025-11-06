@@ -1,0 +1,193 @@
+basePath: /
+definitions:
+  main.KeyStat:
+    properties:
+      activeRefs:
+        type: integer
+      directory:
+        type: string
+      fileSize:
+        type: integer
+      filename:
+        type: string
+      key:
+        type: string
+      mimeType:
+        type: string
+    type: object
+  main.SaveResponse:
+    properties:
+      key:
+        type: string
+    type: object
+  main.StatResponse:
+    properties:
+      activeRefs:
+        additionalProperties:
+          type: integer
+        type: object
+      keys:
+        items:
+          $ref: '#/definitions/main.KeyStat'
+        type: array
+      totalKeys:
+        type: integer
+      totalSize:
+        type: integer
+    type: object
+host: localhost:8080
+info:
+  contact:
+    email: ff4500@gmail.com
+    name: Homin Lee
+    url: https://github.com/suapapa
+  description: A temporary file storage service with TTL support
+  license:
+    name: Apache 2.0
+    url: http://www.apache.org/licenses/LICENSE-2.0.html
+  title: Concierge API
+  version: "1.0"
+paths:
+  /health:
+    get:
+      consumes:
+      - application/json
+      description: Check if the service is healthy by verifying temporary directory
+        access and active refs file readability
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Service is healthy
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service is unhealthy
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Health check
+      tags:
+      - health
+  /luggage:
+    post:
+      consumes:
+      - multipart/form-data
+      description: 'Upload a file and get a unique key. The file will be automatically
+        deleted after TTL expires (default: 3 minutes) if there are no active references.'
+      parameters:
+      - description: File to upload
+        in: formData
+        name: file
+        required: true
+        type: file
+      - description: Custom key (optional, auto-generated if not provided)
+        in: formData
+        name: key
+        type: string
+      - description: MIME type (optional, auto-detected if not provided)
+        in: formData
+        name: mime
+        type: string
+      - description: 'Time to live in minutes (default: 3)'
+        in: formData
+        name: ttl
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/main.SaveResponse'
+        "400":
+          description: Bad request (file required or size exceeds limit)
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Upload a file
+      tags:
+      - luggage
+  /luggage/{key}:
+    get:
+      consumes:
+      - application/json
+      description: Retrieve a file using the key returned from upload. The file can
+        be downloaded with original filename or viewed inline.
+      parameters:
+      - description: File key
+        in: path
+        name: key
+        required: true
+        type: string
+      - description: Set to 'true' to download with original filename
+        in: query
+        name: download
+        type: string
+      produces:
+      - application/octet-stream
+      responses:
+        "200":
+          description: File content
+          schema:
+            type: file
+        "404":
+          description: File not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get a file by key
+      tags:
+      - luggage
+  /stat:
+    get:
+      consumes:
+      - application/json
+      description: Get statistics about all stored files including total keys, total
+        size, active references, and details for each key
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/main.StatResponse'
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get statistics
+      tags:
+      - stat
+securityDefinitions:
+  BearerAuth:
+    description: Type "Bearer" followed by a space and API token.
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"

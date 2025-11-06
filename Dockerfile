@@ -10,8 +10,15 @@ COPY go.mod go.sum ./
 # 의존성 다운로드
 RUN go mod download
 
+# swag 설치 (swagger 문서 생성용)
+RUN go install github.com/swaggo/swag/cmd/swag@latest
+
 # 소스 코드 복사
-COPY . .
+COPY go.mod go.sum ./
+COPY *.go ./
+
+# Swagger 문서 생성
+RUN swag init -g main.go -o docs
 
 # 바이너리 빌드
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o concierge .
