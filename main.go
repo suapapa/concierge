@@ -6,13 +6,17 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/goccy/go-yaml"
 )
+
+const tokenPath = "/secret/token"
 
 var (
 	flagTmpDir    = "/tmp/concierge"
@@ -74,6 +78,30 @@ func main() {
 	activeRefsLockFile = filepath.Join(flagTmpDir, "active_refs.lock")
 
 	r := gin.Default()
+
+	var token string
+	tokenBytes, err := os.ReadFile(tokenPath)
+	if err != nil {
+		log.Printf("Failed to read secret from %s: %v", tokenPath, err)
+	} else {
+		token = strings.TrimSpace(string(tokenBytes))
+	}
+
+	r.Use(func(c *gin.Context) {
+		if c.Request.Method == "GET" || token == "" {
+			c.Next()
+			return
+		}
+
+		if c.GetHeader("Authorization") != "Bearer "+token {
+			c.JSON(401, gin.H{"error": "Unauthorized"})
+			c.Abort()
+			return
+		}
+
+		log.Println("authorized")
+		c.Next()
+	})
 
 	r.POST("/save", func(c *gin.Context) {
 		// 파일 업로드 처리
