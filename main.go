@@ -265,8 +265,13 @@ func main() {
 			c.Header("Content-Type", info.MimeType)
 		}
 
-		// 파일 전송 (원본 파일명으로 다운로드)
-		c.FileAttachment(filePath, info.Filename)
+		downloadWithOriginalFilename := c.Query("download") == "true"
+		if downloadWithOriginalFilename {
+			// 파일 전송 (원본 파일명으로 다운로드)
+			c.FileAttachment(filePath, info.Filename)
+		} else {
+			c.File(filePath)
+		}
 	})
 
 	r.GET("/health", func(c *gin.Context) {
