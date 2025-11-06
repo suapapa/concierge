@@ -33,6 +33,22 @@ type FileInfo struct {
 	Filename string `yaml:"filename"`
 }
 
+type KeyStat struct {
+	Key        string `json:"key"`
+	Filename   string `json:"filename"`
+	MimeType   string `json:"mimeType"`
+	ActiveRefs int    `json:"activeRefs"`
+	FileSize   int64  `json:"fileSize"`
+	Directory  string `json:"directory"`
+}
+
+type StatResponse struct {
+	TotalKeys  int            `json:"totalKeys"`
+	TotalSize  int64          `json:"totalSize"`
+	ActiveRefs map[string]int `json:"activeRefs"`
+	Keys       []KeyStat      `json:"keys"`
+}
+
 func generateKey() (string, error) {
 	bytes := make([]byte, 16)
 	if _, err := rand.Read(bytes); err != nil {
@@ -223,6 +239,111 @@ func main() {
 
 		// 파일 전송
 		c.File(filePath)
+	})
+
+	r.GET("/health", func(c *gin.Context) {
+		// 임시 디렉터리 접근 가능 여부 확인
+		if _, err := os.Stat(flagTmpDir); err != nil {
+			c.JSON(503, gin.H{
+				"status": "unhealthy",
+				"error":  fmt.Sprintf("temporary directory not accessible: %v", err),
+			})
+			return
+		}
+
+		// 활성 참조 파일 읽기 가능 여부 확인
+		_, err := readActiveRefs()
+		if err != nil {
+			// 파일이 없어도 정상 (아직 저장된 파일이 없을 수 있음)
+			// 하지만 읽기 자체가 실패하면 문제
+			if !os.IsNotExist(err) {
+				c.JSON(503, gin.H{
+					"status": "unhealthy",
+					"error":  fmt.Sprintf("failed to read active refs: %v", err),
+				})
+				return
+			}
+		}
+
+		c.JSON(200, gin.H{
+			"status":    "healthy",
+			"timestamp": time.Now().Format(time.RFC3339),
+		})
+	})
+
+	r.GET("/stat", func(c *gin.Context) {
+		// 활성 참조 정보 읽기
+		activeRefs, err := readActiveRefs()
+		if err != nil {
+			c.JSON(500, gin.H{"error": fmt.Sprintf("failed to read active refs: %v", err)})
+			return
+		}
+
+		// 임시 디렉터리 내의 모든 키 디렉터리 스캔
+		entries, err := os.ReadDir(flagTmpDir)
+		if err != nil {
+			c.JSON(500, gin.H{"error": fmt.Sprintf("failed to read directory: %v", err)})
+			return
+		}
+
+		var keys []KeyStat
+		var totalSize int64
+
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				// 디렉터리가 아니면 스킵 (active_refs.yaml, active_refs.lock 등)
+				continue
+			}
+
+			key := entry.Name()
+			keyDir := filepath.Join(flagTmpDir, key)
+			infoPath := filepath.Join(keyDir, "info.yaml")
+
+			// info.yaml 읽기
+			infoData, err := os.ReadFile(infoPath)
+			if err != nil {
+				// info.yaml이 없으면 스킵 (불완전한 디렉터리)
+				continue
+			}
+
+			var info FileInfo
+			if err := yaml.Unmarshal(infoData, &info); err != nil {
+				// 파싱 실패 시 스킵
+				continue
+			}
+
+			// 파일 경로 확인
+			filePath := filepath.Join(keyDir, info.Filename)
+			fileStat, err := os.Stat(filePath)
+			if err != nil {
+				// 파일이 없으면 스킵
+				continue
+			}
+
+			// 활성 참조 수 가져오기
+			refCount := activeRefs[key]
+
+			keyStat := KeyStat{
+				Key:        key,
+				Filename:   info.Filename,
+				MimeType:   info.MimeType,
+				ActiveRefs: refCount,
+				FileSize:   fileStat.Size(),
+				Directory:  keyDir,
+			}
+
+			keys = append(keys, keyStat)
+			totalSize += fileStat.Size()
+		}
+
+		response := StatResponse{
+			TotalKeys:  len(keys),
+			TotalSize:  totalSize,
+			ActiveRefs: activeRefs,
+			Keys:       keys,
+		}
+
+		c.JSON(200, response)
 	})
 
 	if err := r.Run(":" + flagPort); err != nil {
