@@ -62,7 +62,7 @@ make swagger
 - **Errors**: Prefer sentinel errors in `internal/luggage` (e.g. `ErrNotFound`) and `errors.Is` in handlers for HTTP status mapping. Wrap with `%w` where appropriate.
 - **Keys**: Luggage keys are restricted to safe characters (alphanumeric, `_`, `-`); reject path segments and `..`.
 - **Concurrency**: TTL cleanup goroutines must respect cancellation; do not spawn unbounded goroutines without a clear shutdown path.
-- **Docker**: The build stage uses `COPY . .` and `swag init ... --parseInternal`; adding packages only under `internal/` does not require Dockerfile path tweaks.
+- **Docker**: The build stage uses `COPY . .` and `swag init ... --parseInternal`; adding packages only under `internal/` does not require Dockerfile path tweaks. The runtime image copies the binary plus `web/` so `GET /` can serve `web/index.html`.
 
 ## Configuration surface
 

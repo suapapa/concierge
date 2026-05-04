@@ -35,6 +35,9 @@ WORKDIR /app
 # 빌더에서 바이너리 복사
 COPY --from=builder /app/concierge .
 
+# 루트 랜딩 (main.go: StaticFile("/", "web/index.html"))
+COPY --from=builder /app/web ./web
+
 # 소유권 변경
 RUN chown -R appuser:appgroup /app
 
