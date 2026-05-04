@@ -10,7 +10,7 @@
 // @license.url   https://opensource.org/licenses/MIT
 
 // @host      localhost:8080
-// @BasePath  /
+// @BasePath  /api/v1
 
 // @securityDefinitions.apikey BearerAuth
 // @in header
@@ -73,13 +73,18 @@ func main() {
 	r.Use(authMiddleware(token))
 
 	h := &Handlers{Svc: svc}
-	r.POST("/luggage", h.PostLuggage)
-	r.GET("/luggage/:key", h.GetLuggage)
-	r.GET("/stat", h.GetStat)
-	r.GET("/health", h.GetHealth)
+	api := r.Group("/api/v1")
+	{
+		api.POST("/luggage", h.PostLuggage)
+		api.GET("/luggage/:key", h.GetLuggage)
+		api.GET("/stat", h.GetStat)
+		api.GET("/health", h.GetHealth)
+	}
+
+	r.StaticFile("/", "web/index.html")
 
 	if !cfg.Release {
-		docs.SwaggerInfo.BasePath = "/"
+		docs.SwaggerInfo.BasePath = "/api/v1"
 		r.GET("/docs", func(c *gin.Context) {
 			c.Redirect(http.StatusFound, "/swagger/index.html")
 		})

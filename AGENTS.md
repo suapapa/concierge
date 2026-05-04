@@ -21,8 +21,9 @@ Module path: `github.com/suapapa/concierge`.
 
 | Path | Role |
 |------|------|
-| `main.go` | Process entry: flags, signal-aware root `context`, HTTP server lifecycle, auth middleware, Swagger wiring in non-release mode |
+| `main.go` | Process entry: flags, signal-aware root `context`, HTTP server lifecycle, auth middleware, API group under `/api/v1`, root `GET /` from `web/index.html`, Swagger wiring in non-release mode |
 | `handler.go` | Gin handlers on `Handlers`; thin HTTP layer delegating to `internal/luggage` |
+| `web/` | Static site root (`index.html`); replace or extend as the frontend grows |
 | `internal/config` | Flag-driven `Config`, path derivation for active refs |
 | `internal/activerefs` | Advisory lock + YAML persistence for per-key download counts |
 | `internal/luggage` | Core behavior: upload, open/get lease, stats, health, TTL expiry goroutines tied to app `context` |
