@@ -3,13 +3,143 @@ import {
   createApiKey,
   deleteApiKey,
   deleteLuggage,
+  fetchAdminUsers,
   fetchApiKeys,
   fetchStat,
   logout,
+  patchAdminUser,
   publicLuggageUrl,
   uploadLuggage,
 } from './api';
-import type { APIKeyMeta, CreateAPIKeyResponse, KeyStat, StatResponse } from './types';
+import type { APIKeyMeta, CreateAPIKeyResponse, KeyStat, StatResponse, UserRow } from './types';
+
+const MIB_BYTES = 1024 * 1024;
+
+function AdminUserQuotaRow({ u, onSaved }: { u: UserRow; onSaved: () => Promise<void> }) {
+  const [role, setRole] = useState(u.role);
+  const [poolMiB, setPoolMiB] = useState(String(Math.max(1, Math.round(u.maxPoolBytes / MIB_BYTES))));
+  const [singleMiB, setSingleMiB] = useState(String(Math.max(1, Math.round(u.maxSingleFileBytes / MIB_BYTES))));
+  const [daily, setDaily] = useState(String(Math.max(1, u.dailyMaxUploads)));
+  const [busy, setBusy] = useState(false);
+  const [localErr, setLocalErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    setRole(u.role);
+    setPoolMiB(String(Math.max(1, Math.round(u.maxPoolBytes / MIB_BYTES))));
+    setSingleMiB(String(Math.max(1, Math.round(u.maxSingleFileBytes / MIB_BYTES))));
+    setDaily(String(Math.max(1, u.dailyMaxUploads)));
+    setLocalErr(null);
+  }, [u]);
+
+  const onSave = async () => {
+    setLocalErr(null);
+    const p = Number.parseFloat(poolMiB);
+    const s = Number.parseFloat(singleMiB);
+    const d = Number.parseInt(daily, 10);
+    if (!Number.isFinite(p) || p < 1) {
+      setLocalErr('Pool size (MiB) must be at least 1.');
+      return;
+    }
+    if (!Number.isFinite(s) || s < 1) {
+      setLocalErr('Per-file size (MiB) must be at least 1.');
+      return;
+    }
+    if (!Number.isFinite(d) || d < 1 || !Number.isInteger(d)) {
+      setLocalErr('Daily upload count must be a whole number ≥ 1.');
+      return;
+    }
+    const maxPoolBytes = Math.round(p * MIB_BYTES);
+    const maxSingleFileBytes = Math.round(s * MIB_BYTES);
+    if (maxSingleFileBytes > maxPoolBytes) {
+      setLocalErr('Per-file limit cannot exceed pool size.');
+      return;
+    }
+    setBusy(true);
+    const res = await patchAdminUser(u.id, {
+      role,
+      maxPoolBytes,
+      maxSingleFileBytes,
+      dailyMaxUploads: d,
+    });
+    setBusy(false);
+    if (!res.ok) {
+      setLocalErr(res.error);
+      return;
+    }
+    await onSaved();
+  };
+
+  return (
+    <tr>
+      <td className="max-w-[12rem] truncate px-3 py-2 text-xs text-zinc-800 dark:text-zinc-200" title={u.email} translate="no">
+        {u.email}
+      </td>
+      <td className="px-3 py-2">
+        <select
+          className="w-full min-w-[5.5rem] rounded border border-zinc-300 bg-white px-2 py-1 text-xs dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
+          value={role}
+          onChange={(e) => setRole(e.target.value)}
+          disabled={busy}
+          aria-label={`Role for ${u.email}`}
+        >
+          <option value="guest">guest</option>
+          <option value="admin">admin</option>
+        </select>
+      </td>
+      <td className="px-3 py-2">
+        <input
+          type="number"
+          min={1}
+          step={1}
+          className="w-20 rounded border border-zinc-300 bg-white px-2 py-1 text-xs tabular-nums dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
+          value={poolMiB}
+          onChange={(e) => setPoolMiB(e.target.value)}
+          disabled={busy}
+          aria-label={`Max pool MiB for ${u.email}`}
+        />
+      </td>
+      <td className="px-3 py-2">
+        <input
+          type="number"
+          min={1}
+          step={1}
+          className="w-20 rounded border border-zinc-300 bg-white px-2 py-1 text-xs tabular-nums dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
+          value={singleMiB}
+          onChange={(e) => setSingleMiB(e.target.value)}
+          disabled={busy}
+          aria-label={`Max single file MiB for ${u.email}`}
+        />
+      </td>
+      <td className="px-3 py-2">
+        <input
+          type="number"
+          min={1}
+          step={1}
+          className="w-16 rounded border border-zinc-300 bg-white px-2 py-1 text-xs tabular-nums dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
+          value={daily}
+          onChange={(e) => setDaily(e.target.value)}
+          disabled={busy}
+          aria-label={`Daily upload cap for ${u.email}`}
+        />
+      </td>
+      <td className="px-3 py-2">
+        <button
+          type="button"
+          className="rounded-md bg-blue-600 px-2 py-1 text-xs font-semibold text-white transition hover:bg-blue-700 disabled:opacity-60"
+          disabled={busy}
+          onClick={() => void onSave()}
+        >
+          {busy ? 'Saving…' : 'Save'}
+        </button>
+        {localErr && (
+          <p className="mt-1 max-w-[14rem] text-xs text-red-700 dark:text-red-300" role="alert">
+            {localErr}
+          </p>
+        )}
+      </td>
+    </tr>
+  );
+}
 
 function formatBytes(n: number): string {
   if (!Number.isFinite(n) || n < 0) {
@@ -237,6 +367,7 @@ export default function App() {
   const [createKeyBusy, setCreateKeyBusy] = useState(false);
   const [revokeKeyBusy, setRevokeKeyBusy] = useState<number | null>(null);
   const [newKeyDialog, setNewKeyDialog] = useState<CreateAPIKeyResponse | null>(null);
+  const [adminUsers, setAdminUsers] = useState<UserRow[] | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
@@ -248,12 +379,14 @@ export default function App() {
       setAuthRequired(true);
       setStat(null);
       setApiKeys([]);
+      setAdminUsers(null);
       return;
     }
     setAuthRequired(false);
     if (!r.ok || !r.data) {
       setStat(null);
       setApiKeys([]);
+      setAdminUsers(null);
       setBanner({ tone: 'error', text: r.error ?? 'Could not load your files.' });
       return;
     }
@@ -263,6 +396,12 @@ export default function App() {
       setApiKeys(ak.data);
     } else {
       setApiKeys([]);
+    }
+    const adm = await fetchAdminUsers();
+    if (adm.ok) {
+      setAdminUsers(adm.data);
+    } else {
+      setAdminUsers(null);
     }
   }, []);
 
@@ -585,6 +724,50 @@ export default function App() {
                 </div>
               )}
             </section>
+
+            {adminUsers !== null && (
+              <section className="rounded-lg border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900" aria-labelledby="admin-users-heading">
+                <h2 id="admin-users-heading" className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
+                  Users &amp; quotas
+                </h2>
+                <p className="mt-2 max-w-2xl text-sm text-zinc-600 dark:text-zinc-400">
+                  Per-user limits: total stored size (pool), largest single upload, and uploads per UTC day. Effective per-file
+                  limit is the smaller of the global server cap and the user&apos;s single-file quota. Defaults for new users:
+                  100&nbsp;MiB pool, 10&nbsp;MiB per file, 10 uploads/day.
+                </p>
+                <div className="mt-4 overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
+                  <table className="min-w-full divide-y divide-zinc-200 text-left text-sm dark:divide-zinc-800">
+                    <thead className="bg-zinc-50 dark:bg-zinc-900/80">
+                      <tr>
+                        <th scope="col" className="px-3 py-2 font-medium text-zinc-700 dark:text-zinc-300">
+                          Email
+                        </th>
+                        <th scope="col" className="px-3 py-2 font-medium text-zinc-700 dark:text-zinc-300">
+                          Role
+                        </th>
+                        <th scope="col" className="px-3 py-2 font-medium text-zinc-700 dark:text-zinc-300">
+                          Pool (MiB)
+                        </th>
+                        <th scope="col" className="px-3 py-2 font-medium text-zinc-700 dark:text-zinc-300">
+                          Max file (MiB)
+                        </th>
+                        <th scope="col" className="px-3 py-2 font-medium text-zinc-700 dark:text-zinc-300">
+                          Daily uploads
+                        </th>
+                        <th scope="col" className="px-3 py-2 font-medium text-zinc-700 dark:text-zinc-300">
+                          Actions
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-zinc-200 bg-white dark:divide-zinc-800 dark:bg-zinc-950">
+                      {adminUsers.map((row) => (
+                        <AdminUserQuotaRow key={row.id} u={row} onSaved={load} />
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            )}
 
             <section aria-labelledby="files-heading">
               <div className="flex flex-wrap items-end justify-between gap-3">

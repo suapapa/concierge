@@ -1,4 +1,4 @@
-import type { APIKeyMeta, CreateAPIKeyResponse, StatResponse } from './types';
+import type { APIKeyMeta, CreateAPIKeyResponse, StatResponse, UserRow } from './types';
 
 const apiPrefix = '/api/v1';
 
@@ -129,6 +129,50 @@ export async function createApiKey(label: string): Promise<{ ok: true; data: Cre
     return { ok: false, error: 'Server did not return a key.' };
   }
   return { ok: true, data };
+}
+
+/** Returns users if caller is admin; 403 if not admin. */
+export async function fetchAdminUsers(): Promise<
+  { ok: true; data: UserRow[] } | { ok: false; status: number; error?: string }
+> {
+  const res = await fetch(`${apiPrefix}/admin/users`, {
+    credentials: 'include',
+    headers: { Accept: 'application/json' },
+  });
+  if (res.status === 200) {
+    const data = await parseJSON<UserRow[]>(res);
+    if (!data || !Array.isArray(data)) {
+      return { ok: false, status: res.status, error: 'Invalid user list response.' };
+    }
+    return { ok: true, data };
+  }
+  if (res.status === 403) {
+    return { ok: false, status: 403 };
+  }
+  const body = await parseJSON<{ error?: string }>(res);
+  return { ok: false, status: res.status, error: body?.error ?? `Request failed (${res.status})` };
+}
+
+export async function patchAdminUser(
+  id: number,
+  patch: Partial<{
+    role: string;
+    maxPoolBytes: number;
+    maxSingleFileBytes: number;
+    dailyMaxUploads: number;
+  }>,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const res = await fetch(`${apiPrefix}/admin/users/${encodeURIComponent(String(id))}`, {
+    method: 'PATCH',
+    credentials: 'include',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  });
+  if (res.status === 204) {
+    return { ok: true };
+  }
+  const body = await parseJSON<{ error?: string }>(res);
+  return { ok: false, error: body?.error ?? `Update failed (${res.status})` };
 }
 
 export async function deleteApiKey(id: number): Promise<{ ok: true } | { ok: false; error: string }> {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -19,9 +20,10 @@ import (
 
 // Handlers wires HTTP entrypoints to the luggage service.
 type Handlers struct {
-	Svc          *luggage.Service
-	Store        *store.Store // nil when CONCIERGE_DATABASE_URL is unset
-	CookieSecure bool         // forwarded from config for auth cookie flags
+	Svc            *luggage.Service
+	Store          *store.Store // nil when CONCIERGE_DATABASE_URL is unset
+	CookieSecure   bool         // forwarded from config for auth cookie flags
+	MaxUploadBytes int          // global cap from -l / env; per-user cap is the lesser when DB mode
 }
 
 // CreateAPIKeyResponse is returned from POST /api/v1/api-keys (plaintext secret only once in `key`).
@@ -77,6 +79,13 @@ func (h *Handlers) PostLuggage(c *gin.Context) {
 	defer src.Close()
 
 	ownerID := int64(0)
+	reservedDaily := false
+	globalLim := int64(h.MaxUploadBytes)
+	if globalLim <= 0 {
+		globalLim = h.Svc.MaxUploadBytes()
+	}
+	var maxPayload int64
+
 	if !auth.IsLegacyBearer(c) {
 		uid, ok := auth.UserID(c)
 		if !ok {
@@ -84,18 +93,65 @@ func (h *Handlers) PostLuggage(c *gin.Context) {
 			return
 		}
 		ownerID = uid
+
+		if h.Store != nil && ownerID > 0 {
+			u, err := h.Store.UserByID(c.Request.Context(), ownerID)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+			if u == nil {
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+				return
+			}
+			effectiveSingle := min(globalLim, u.MaxSingleFileBytes)
+			maxPayload = effectiveSingle
+			if file.Size > 0 && file.Size > effectiveSingle {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("file exceeds allowed size (%d bytes)", effectiveSingle)})
+				return
+			}
+			addBytes := file.Size
+			if addBytes <= 0 {
+				addBytes = effectiveSingle
+			}
+			st, err := h.Svc.Stat(c.Request.Context(), luggage.StatOptions{FilterUserID: &ownerID})
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+			if st.TotalSize+addBytes > u.MaxPoolBytes {
+				c.JSON(http.StatusForbidden, gin.H{"error": "storage pool quota exceeded for your account"})
+				return
+			}
+			if err := h.Store.ReserveDailyUpload(c.Request.Context(), ownerID); err != nil {
+				switch {
+				case errors.Is(err, store.ErrDailyUploadQuotaExceeded):
+					c.JSON(http.StatusForbidden, gin.H{"error": "daily upload limit reached for your account"})
+				case errors.Is(err, pgx.ErrNoRows):
+					c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+				default:
+					c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				}
+				return
+			}
+			reservedDaily = true
+		}
 	}
 
 	resp, err := h.Svc.Upload(c.Request.Context(), luggage.UploadParams{
-		Reader:        src,
-		Filename:      file.Filename,
-		Size:          file.Size,
-		MIMEType:      mimeType,
-		TTL:           ttl,
-		CustomKey:     c.PostForm("key"),
-		OwnerUserID:   ownerID,
+		Reader:            src,
+		Filename:          file.Filename,
+		Size:              file.Size,
+		MIMEType:          mimeType,
+		TTL:               ttl,
+		CustomKey:         c.PostForm("key"),
+		OwnerUserID:       ownerID,
+		MaxPayloadBytes:   maxPayload,
 	})
 	if err != nil {
+		if reservedDaily && h.Store != nil {
+			_ = h.Store.ReleaseDailyUpload(context.Background(), ownerID)
+		}
 		switch {
 		case errors.Is(err, luggage.ErrInvalidKey),
 			errors.Is(err, luggage.ErrKeyExists),
@@ -319,21 +375,21 @@ func (h *Handlers) AdminListUsers(c *gin.Context) {
 	c.JSON(http.StatusOK, users)
 }
 
-// AdminPatchUserRole updates a user's role.
-// @Summary      Update user role
-// @Description  Sets role to admin or guest. Cannot demote the last remaining admin.
+// AdminPatchUser updates a user's role and/or per-user quotas (max pool bytes, max single file bytes, daily upload cap).
+// @Summary      Update user (role and quotas)
+// @Description  Sets role to admin or guest and/or storage quotas. Omitted fields are left unchanged. Cannot demote the last remaining admin. Defaults for new users: 100 MiB pool, 10 MiB per file, 10 uploads per UTC day.
 // @Tags         admin
 // @Security     BearerAuth
 // @Accept       json
 // @Param        id    path      int64   true  "User id"
-// @Param        body  body      object  true  "Payload"  example({"role":"guest"})
+// @Param        body  body      object  true  "Payload"  example({"role":"guest","maxPoolBytes":104857600,"maxSingleFileBytes":10485760,"dailyMaxUploads":10})
 // @Success      204   "No content"
 // @Failure      400   {object}  map[string]string
 // @Failure      403   {object}  map[string]string
 // @Failure      404   {object}  map[string]string
 // @Failure      500   {object}  map[string]string
 // @Router       /admin/users/{id} [patch]
-func (h *Handlers) AdminPatchUserRole(c *gin.Context) {
+func (h *Handlers) AdminPatchUser(c *gin.Context) {
 	if h.Store == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "database not configured"})
 		return
@@ -345,15 +401,17 @@ func (h *Handlers) AdminPatchUserRole(c *gin.Context) {
 		return
 	}
 	var body struct {
-		Role string `json:"role"`
+		Role               *string `json:"role"`
+		MaxPoolBytes       *int64  `json:"maxPoolBytes"`
+		MaxSingleFileBytes *int64  `json:"maxSingleFileBytes"`
+		DailyMaxUploads    *int    `json:"dailyMaxUploads"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
 		return
 	}
-	role := strings.ToLower(strings.TrimSpace(body.Role))
-	if role != auth.RoleAdmin && role != auth.RoleGuest {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "role must be admin or guest"})
+	if body.Role == nil && body.MaxPoolBytes == nil && body.MaxSingleFileBytes == nil && body.DailyMaxUploads == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "no fields to update"})
 		return
 	}
 	ctx := c.Request.Context()
@@ -366,20 +424,49 @@ func (h *Handlers) AdminPatchUserRole(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
 		return
 	}
-	if target.Role == auth.RoleAdmin && role == auth.RoleGuest {
-		n, err := h.Store.CountAdmins(ctx)
-		if err != nil {
+	if body.Role != nil {
+		role := strings.ToLower(strings.TrimSpace(*body.Role))
+		if role != auth.RoleAdmin && role != auth.RoleGuest {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "role must be admin or guest"})
+			return
+		}
+		if target.Role == auth.RoleAdmin && role == auth.RoleGuest {
+			n, err := h.Store.CountAdmins(ctx)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+			if n <= 1 {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "cannot demote the last admin"})
+				return
+			}
+		}
+		if err := h.Store.SetUserRole(ctx, id, role); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		if n <= 1 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "cannot demote the last admin"})
+	}
+	if body.MaxPoolBytes != nil || body.MaxSingleFileBytes != nil || body.DailyMaxUploads != nil {
+		pool := target.MaxPoolBytes
+		single := target.MaxSingleFileBytes
+		daily := target.DailyMaxUploads
+		if body.MaxPoolBytes != nil {
+			pool = *body.MaxPoolBytes
+		}
+		if body.MaxSingleFileBytes != nil {
+			single = *body.MaxSingleFileBytes
+		}
+		if body.DailyMaxUploads != nil {
+			daily = *body.DailyMaxUploads
+		}
+		if err := h.Store.UpdateUserQuotas(ctx, id, pool, single, daily); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+				return
+			}
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-	}
-	if err := h.Store.SetUserRole(ctx, id, role); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
 	}
 	c.Status(http.StatusNoContent)
 }

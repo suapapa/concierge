@@ -39,6 +39,14 @@ func NewService(appCtx context.Context, tmpDir string, sizeLimit int, refs *acti
 	}
 }
 
+// MaxUploadBytes returns the global upload size cap from service construction (-l / CONCIERGE_*).
+func (s *Service) MaxUploadBytes() int64 {
+	if s == nil {
+		return 0
+	}
+	return s.sizeLimit
+}
+
 // UploadParams carries a single upload after the HTTP layer parsed the multipart form.
 type UploadParams struct {
 	Reader        io.Reader
@@ -48,6 +56,8 @@ type UploadParams struct {
 	TTL           time.Duration
 	CustomKey     string
 	OwnerUserID   int64
+	// MaxPayloadBytes caps this upload; when > 0, the effective limit is min(service limit, MaxPayloadBytes).
+	MaxPayloadBytes int64
 }
 
 // Upload stores payload and metadata under a new or caller-chosen key.
@@ -61,7 +71,11 @@ func (s *Service) Upload(ctx context.Context, p UploadParams) (*SaveResponse, er
 	if p.Filename == "" {
 		return nil, ErrMissingFilename
 	}
-	if p.Size > 0 && p.Size > s.sizeLimit {
+	limit := s.sizeLimit
+	if p.MaxPayloadBytes > 0 && p.MaxPayloadBytes < limit {
+		limit = p.MaxPayloadBytes
+	}
+	if p.Size > 0 && p.Size > limit {
 		return nil, fmt.Errorf("%d bytes: %w", p.Size, ErrPayloadTooLarge)
 	}
 	if p.TTL <= 0 {
@@ -99,14 +113,14 @@ func (s *Service) Upload(ctx context.Context, p UploadParams) (*SaveResponse, er
 		cleanup()
 		return nil, fmt.Errorf("create payload: %w", err)
 	}
-	limited := io.LimitReader(p.Reader, s.sizeLimit+1)
+	limited := io.LimitReader(p.Reader, limit+1)
 	written, err := io.Copy(dst, limited)
 	_ = dst.Close()
 	if err != nil {
 		cleanup()
 		return nil, fmt.Errorf("save payload: %w", err)
 	}
-	if written > s.sizeLimit {
+	if written > limit {
 		cleanup()
 		return nil, ErrPayloadTooLarge
 	}

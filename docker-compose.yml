@@ -5,6 +5,7 @@
 services:
   postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_USER: concierge
       POSTGRES_PASSWORD: concierge
@@ -21,6 +22,7 @@ services:
 
   concierge:
     profiles: ["app"]
+    restart: unless-stopped
     build: .
     depends_on:
       postgres:

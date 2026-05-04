@@ -83,12 +83,15 @@ func (s *Store) Migrate(ctx context.Context) error {
 
 // User is a persisted account row.
 type User struct {
-	ID          int64  `json:"id"`
-	GoogleSub   string `json:"googleSub"`
-	Email       string `json:"email"`
-	DisplayName string `json:"displayName,omitempty"`
-	PictureURL  string `json:"pictureUrl,omitempty"`
-	Role        string `json:"role"` // "admin" or "guest"
+	ID                   int64  `json:"id"`
+	GoogleSub            string `json:"googleSub"`
+	Email                string `json:"email"`
+	DisplayName          string `json:"displayName,omitempty"`
+	PictureURL           string `json:"pictureUrl,omitempty"`
+	Role                 string `json:"role"` // "admin" or "guest"
+	MaxPoolBytes         int64  `json:"maxPoolBytes"`
+	MaxSingleFileBytes   int64  `json:"maxSingleFileBytes"`
+	DailyMaxUploads      int    `json:"dailyMaxUploads"`
 }
 
 // Ping checks database connectivity.
@@ -106,9 +109,11 @@ func (s *Store) UpsertGoogleUser(ctx context.Context, sub, email, displayName, p
 
 	var u User
 	err := s.pool.QueryRow(ctx, `
-		SELECT id, google_sub, email, COALESCE(display_name,''), COALESCE(picture_url,''), role
+		SELECT id, google_sub, email, COALESCE(display_name,''), COALESCE(picture_url,''), role,
+			quota_max_pool_bytes, quota_max_single_file_bytes, quota_daily_max_uploads
 		FROM users WHERE google_sub = $1`, sub,
-	).Scan(&u.ID, &u.GoogleSub, &u.Email, &u.DisplayName, &u.PictureURL, &u.Role)
+	).Scan(&u.ID, &u.GoogleSub, &u.Email, &u.DisplayName, &u.PictureURL, &u.Role,
+		&u.MaxPoolBytes, &u.MaxSingleFileBytes, &u.DailyMaxUploads)
 	if err == nil {
 		_, err = s.pool.Exec(ctx, `
 			UPDATE users SET email = $2, display_name = $3, picture_url = $4,
@@ -121,7 +126,7 @@ func (s *Store) UpsertGoogleUser(ctx context.Context, sub, email, displayName, p
 		u.Email = email
 		u.DisplayName = displayName
 		u.PictureURL = pictureURL
-		return &u, nil
+		return s.UserByID(ctx, u.ID)
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err
@@ -134,9 +139,11 @@ func (s *Store) UpsertGoogleUser(ctx context.Context, sub, email, displayName, p
 	err = s.pool.QueryRow(ctx, `
 		INSERT INTO users (google_sub, email, display_name, picture_url, role, last_login_at)
 		VALUES ($1, $2, $3, $4, $5, now())
-		RETURNING id, google_sub, email, COALESCE(display_name,''), COALESCE(picture_url,''), role`,
+		RETURNING id, google_sub, email, COALESCE(display_name,''), COALESCE(picture_url,''), role,
+			quota_max_pool_bytes, quota_max_single_file_bytes, quota_daily_max_uploads`,
 		sub, email, nullIfEmpty(displayName), nullIfEmpty(pictureURL), role,
-	).Scan(&u.ID, &u.GoogleSub, &u.Email, &u.DisplayName, &u.PictureURL, &u.Role)
+	).Scan(&u.ID, &u.GoogleSub, &u.Email, &u.DisplayName, &u.PictureURL, &u.Role,
+		&u.MaxPoolBytes, &u.MaxSingleFileBytes, &u.DailyMaxUploads)
 	if err != nil {
 		return nil, err
 	}
@@ -196,7 +203,8 @@ func (s *Store) DeleteSession(ctx context.Context, rawToken []byte) error {
 // ListUsers returns all users (admin UI).
 func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, google_sub, email, COALESCE(display_name,''), COALESCE(picture_url,''), role
+		SELECT id, google_sub, email, COALESCE(display_name,''), COALESCE(picture_url,''), role,
+			quota_max_pool_bytes, quota_max_single_file_bytes, quota_daily_max_uploads
 		FROM users ORDER BY id`)
 	if err != nil {
 		return nil, err
@@ -205,7 +213,8 @@ func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
 	var out []User
 	for rows.Next() {
 		var u User
-		if err := rows.Scan(&u.ID, &u.GoogleSub, &u.Email, &u.DisplayName, &u.PictureURL, &u.Role); err != nil {
+		if err := rows.Scan(&u.ID, &u.GoogleSub, &u.Email, &u.DisplayName, &u.PictureURL, &u.Role,
+			&u.MaxPoolBytes, &u.MaxSingleFileBytes, &u.DailyMaxUploads); err != nil {
 			return nil, err
 		}
 		out = append(out, u)
@@ -239,9 +248,11 @@ func (s *Store) CountAdmins(ctx context.Context) (int64, error) {
 func (s *Store) UserByID(ctx context.Context, id int64) (*User, error) {
 	var u User
 	err := s.pool.QueryRow(ctx, `
-		SELECT id, google_sub, email, COALESCE(display_name,''), COALESCE(picture_url,''), role
+		SELECT id, google_sub, email, COALESCE(display_name,''), COALESCE(picture_url,''), role,
+			quota_max_pool_bytes, quota_max_single_file_bytes, quota_daily_max_uploads
 		FROM users WHERE id = $1`, id,
-	).Scan(&u.ID, &u.GoogleSub, &u.Email, &u.DisplayName, &u.PictureURL, &u.Role)
+	).Scan(&u.ID, &u.GoogleSub, &u.Email, &u.DisplayName, &u.PictureURL, &u.Role,
+		&u.MaxPoolBytes, &u.MaxSingleFileBytes, &u.DailyMaxUploads)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}

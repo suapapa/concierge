@@ -15,7 +15,7 @@ If only one file seems affected (e.g. a new flag), still check the other for sta
 
 **Concierge** is a small Gin HTTP service for temporary file hosting: uploads go under a configurable temp directory with per-object TTL, YAML sidecar metadata (`info.yaml`, including `ownerUserId` when authenticated), and a file-backed active reference map so objects are not deleted while downloads are in progress.
 
-With **`CONCIERGE_DATABASE_URL`** set, the service adds **Google OAuth**, **PostgreSQL** (`users`, `sessions`, `api_keys`), **opaque session cookies** (`concierge_session`), **per-user API keys** (`concierge_…` bearer secrets, stored hashed), and **roles** (`admin` / `guest`). Downloads `GET /api/v1/luggage/:key` remain public for anyone with the key.
+With **`CONCIERGE_DATABASE_URL`** set, the service adds **Google OAuth**, **PostgreSQL** (`users`, `sessions`, `api_keys`, `user_daily_uploads` for quota counters), **opaque session cookies** (`concierge_session`), **per-user API keys** (`concierge_…` bearer secrets, stored hashed), **roles** (`admin` / `guest`), and **per-user upload quotas** on `users` (pool size, single-file max, daily upload count; UTC day). Downloads `GET /api/v1/luggage/:key` remain public for anyone with the key.
 
 Module path: `github.com/suapapa/concierge`.
 
@@ -23,17 +23,17 @@ Module path: `github.com/suapapa/concierge`.
 
 | Path | Role |
 |------|------|
-| `main.go` | Process entry: flags, `config.ApplyEnv()`, signal-aware root `context`, HTTP routes: public `GET /luggage/:key`, OAuth, protected group (session, `Bearer concierge_…` API key, or legacy Bearer), `GET/POST/DELETE /api-keys`, admin group, Swagger in non-release mode |
-| `handler.go` | Gin handlers on `Handlers`; authz for delete/stat; admin user APIs |
+| `main.go` | Process entry: flags, `config.ApplyEnv()`, signal-aware root `context`, HTTP routes: public `GET /luggage/:key`, OAuth, protected group (session, `Bearer concierge_…` API key, or legacy Bearer), `GET/POST/DELETE /api-keys`, admin group (`GET/PATCH /admin/users`), Swagger in non-release mode |
+| `handler.go` | Gin handlers on `Handlers`; authz for delete/stat; upload quota checks (DB users); admin user/quota APIs |
 | `web/` | Static site root (`index.html`); lightweight landing page |
-| `fe/` | Vite + React + TypeScript dashboard: `GET /api/v1/stat`, upload, delete, API key UI, copy public URLs; `npm run dev` proxies `/api` to Concierge (see `fe/.env.example`) |
+| `fe/` | Vite + React + TypeScript dashboard: `GET /api/v1/stat`, upload, delete, API key UI, copy public URLs, admin “Users & quotas” when `GET /admin/users` succeeds; `npm run dev` proxies `/api` to Concierge (see `fe/.env.example`) |
 | `internal/config` | `Config`, flags, `ApplyEnv()` for `CONCIERGE_*` variables |
-| `internal/store` | PostgreSQL pool, embedded migrations, user/session/API-key CRUD, `LookupAPIKey` |
+| `internal/store` | PostgreSQL pool, embedded migrations, user/session/API-key CRUD, `LookupAPIKey`, per-user quotas + daily upload reservation |
 | `internal/auth` | Google OAuth start/callback, signed OAuth state (HMAC + `SESSION_SECRET`), `RequireUserOrLegacy` (legacy Bearer → API key → session) / `RequireAdmin` |
 | `internal/activerefs` | Advisory lock + YAML persistence for per-key download counts |
 | `internal/luggage` | Core behavior: upload (with owner), `ReadFileInfo`, `Delete`, open/get lease, stats (optional owner filter), health, TTL expiry goroutines tied to app `context` |
 | `docs/` | Generated Swagger (`swag`); do not hand-edit `docs/docs.go` |
-| `docker-compose.yml` | Local **PostgreSQL**; optional **`concierge`** service via `--profile app`. Compose reads repo-root **`.env`** for `${CONCIERGE_*}` interpolation (or **`docker compose --env-file …`**). |
+| `docker-compose.yml` | Local **PostgreSQL**; optional **`concierge`** service via `--profile app`. Compose reads repo-root **`.env`** for `${CONCIERGE_*}` interpolation (or **`docker compose --env-file …`**); copy **`.env.sample`** to `.env` and fill secrets. Both services use **`restart: unless-stopped`** so they come back after a host reboot unless you stopped them explicitly. |
 
 New application logic belongs under `internal/`; keep `main` and handlers as wiring unless there is a strong reason to grow them.
 

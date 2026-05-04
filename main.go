@@ -96,6 +96,7 @@ func main() {
 		Svc:            svc,
 		Store:          st,
 		CookieSecure:   cfg.CookieSecure,
+		MaxUploadBytes: cfg.SizeLimit,
 	}
 
 	r := newEngine(cfg.Release)
@@ -128,7 +129,7 @@ func main() {
 	admin.Use(auth.RequireUserOrLegacy(legacyToken, st, st))
 	admin.Use(auth.RequireAdmin())
 	admin.GET("/users", h.AdminListUsers)
-	admin.PATCH("/users/:id", h.AdminPatchUserRole)
+	admin.PATCH("/users/:id", h.AdminPatchUser)
 
 	r.StaticFile("/", "web/index.html")
 

@@ -76,14 +76,14 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Sets role to admin or guest. Cannot demote the last remaining admin.",
+                "description": "Sets role to admin or guest and/or storage quotas. Omitted fields are left unchanged. Cannot demote the last remaining admin. Defaults for new users: 100 MiB pool, 10 MiB per file, 10 uploads per UTC day.",
                 "consumes": [
                     "application/json"
                 ],
                 "tags": [
                     "admin"
                 ],
-                "summary": "Update user role",
+                "summary": "Update user (role and quotas)",
                 "parameters": [
                     {
                         "type": "integer",
@@ -738,6 +738,9 @@ const docTemplate = `{
         "store.User": {
             "type": "object",
             "properties": {
+                "dailyMaxUploads": {
+                    "type": "integer"
+                },
                 "displayName": {
                     "type": "string"
                 },
@@ -748,6 +751,12 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "id": {
+                    "type": "integer"
+                },
+                "maxPoolBytes": {
+                    "type": "integer"
+                },
+                "maxSingleFileBytes": {
                     "type": "integer"
                 },
                 "pictureUrl": {

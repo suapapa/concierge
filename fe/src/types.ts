@@ -30,3 +30,16 @@ export type CreateAPIKeyResponse = {
   label?: string;
   createdAt: string;
 };
+
+/** User row from GET /admin/users (includes per-user quotas). */
+export type UserRow = {
+  id: number;
+  googleSub: string;
+  email: string;
+  displayName?: string;
+  pictureUrl?: string;
+  role: string;
+  maxPoolBytes: number;
+  maxSingleFileBytes: number;
+  dailyMaxUploads: number;
+};

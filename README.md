@@ -15,7 +15,7 @@ A web application for temporarily hosting files publicly. Files are automaticall
 - **Optional Google login**: Multi-user mode with PostgreSQL, roles (`admin` / `guest`), and opaque sessions
 - **Per-object ownership**: Each upload records `ownerUserId` in `info.yaml` for delete/stat scoping
 - **Per-user API keys** (database mode): `concierge_…` secrets; `Authorization: Bearer` on protected routes; create/list/revoke via API or the `fe/` dashboard
-- **React dashboard (`fe/`)**: List your luggage, upload with TTL, copy public links, delete, and manage API keys (session or legacy Bearer)
+- **React dashboard (`fe/`)**: List your luggage, upload with TTL, copy public links, delete, manage API keys (session or legacy Bearer), and **admins** get a “Users & quotas” table (`PATCH` per user)
 
 ## Installation
 
@@ -80,7 +80,7 @@ Protected routes try the legacy file token first (if configured), then a `concie
 **Roles:**
 
 - **guest**: Upload (owned by self), delete own objects, `GET /stat` scoped to own keys.
-- **admin**: Same as guest on own objects, plus delete any object, full `GET /stat`, `GET/PATCH /api/v1/admin/users`.
+- **admin**: Same as guest on own objects, plus delete any object, full `GET /stat`, `GET/PATCH /api/v1/admin/users` (list users and edit **role** plus **per-user quotas**: max total stored bytes “pool”, max single-file bytes, max uploads per UTC day). New users get defaults **100 MiB** pool, **10 MiB** per file, **10** uploads/day. The effective per-upload cap is the **minimum** of the server-wide `-l` max-bytes flag and the user’s single-file quota. **Legacy bearer** uploads (`ownerUserId` 0) are not subject to per-user quotas.
 
 **Downloads** `GET /api/v1/luggage/:key` stay **public** (anyone with the key), same as single-token mode.
 
@@ -94,15 +94,17 @@ Start PostgreSQL only (for running `./concierge` on the host against `localhost:
 docker compose up -d
 ```
 
+Services use `restart: unless-stopped`, so after a machine reboot Docker brings them back up unless you ran `docker compose stop` (or equivalent) first.
+
 Example DSN:
 
 `postgres://concierge:concierge@localhost:5432/concierge?sslmode=disable`
 
 Optional: run the app in Compose (needs Google OAuth and session secrets).
 
-**Using a `.env` file (recommended):** From the repo root (the directory that contains `docker-compose.yml`), create a file named `.env`. Docker Compose loads it automatically for `${…}` substitution in the compose file—you do not need `export` in your shell.
+**Using a `.env` file (recommended):** From the repo root (the directory that contains `docker-compose.yml`), create a file named `.env`. Docker Compose loads it automatically for `${…}` substitution in the compose file—you do not need `export` in your shell. Start from **`.env.sample`** (`cp .env.sample .env`) and fill in secrets.
 
-Example `.env` for `docker compose --profile app up`:
+Example values for `docker compose --profile app up`:
 
 ```env
 CONCIERGE_GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
