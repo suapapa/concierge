@@ -41,12 +41,13 @@ func NewService(appCtx context.Context, tmpDir string, sizeLimit int, refs *acti
 
 // UploadParams carries a single upload after the HTTP layer parsed the multipart form.
 type UploadParams struct {
-	Reader    io.Reader
-	Filename  string
-	Size      int64
-	MIMEType  string
-	TTL       time.Duration
-	CustomKey string
+	Reader        io.Reader
+	Filename      string
+	Size          int64
+	MIMEType      string
+	TTL           time.Duration
+	CustomKey     string
+	OwnerUserID   int64
 }
 
 // Upload stores payload and metadata under a new or caller-chosen key.
@@ -110,7 +111,7 @@ func (s *Service) Upload(ctx context.Context, p UploadParams) (*SaveResponse, er
 		return nil, ErrPayloadTooLarge
 	}
 
-	info := FileInfo{MimeType: p.MIMEType, Filename: p.Filename}
+	info := FileInfo{MimeType: p.MIMEType, Filename: p.Filename, OwnerUserID: p.OwnerUserID}
 	infoData, err := yaml.Marshal(info)
 	if err != nil {
 		cleanup()
@@ -239,6 +240,56 @@ func (s *Service) OpenGet(ctx context.Context, key string) (*GetLease, error) {
 	return lease, nil
 }
 
+// ReadFileInfo loads persisted metadata for a key without incrementing active refs.
+func (s *Service) ReadFileInfo(ctx context.Context, key string) (FileInfo, error) {
+	var zero FileInfo
+	if err := ValidateKey(key); err != nil {
+		return zero, fmt.Errorf("validate key: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return zero, err
+	}
+	keyDir := filepath.Join(s.tmpDir, key)
+	infoPath := filepath.Join(keyDir, "info.yaml")
+	infoData, err := os.ReadFile(infoPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return zero, ErrNotFound
+		}
+		return zero, fmt.Errorf("read info: %w", err)
+	}
+	var info FileInfo
+	if err := yaml.Unmarshal(infoData, &info); err != nil {
+		return zero, fmt.Errorf("parse info: %w", err)
+	}
+	return info, nil
+}
+
+// Delete removes a key directory and clears active-ref bookkeeping for that key.
+func (s *Service) Delete(ctx context.Context, key string) error {
+	if err := ValidateKey(key); err != nil {
+		return fmt.Errorf("validate key: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	keyDir := filepath.Join(s.tmpDir, key)
+	infoPath := filepath.Join(keyDir, "info.yaml")
+	if _, err := os.Stat(infoPath); err != nil {
+		if os.IsNotExist(err) {
+			return ErrNotFound
+		}
+		return fmt.Errorf("stat info: %w", err)
+	}
+	if err := os.RemoveAll(keyDir); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove key dir: %w", err)
+	}
+	if err := s.refs.DeleteKey(context.Background(), key); err != nil {
+		log.Printf("luggage: delete active ref %s: %v", key, err)
+	}
+	return nil
+}
+
 // Health checks temp directory accessibility and active-ref store readability.
 func (s *Service) Health(ctx context.Context) error {
 	if _, err := os.Stat(s.tmpDir); err != nil {
@@ -252,7 +303,7 @@ func (s *Service) Health(ctx context.Context) error {
 }
 
 // Stat scans the temp directory and merges payload metadata with reference counts.
-func (s *Service) Stat(ctx context.Context) (*StatResponse, error) {
+func (s *Service) Stat(ctx context.Context, opts StatOptions) (*StatResponse, error) {
 	activeRefs, err := s.refs.Read(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("read active refs: %w", err)
@@ -284,22 +335,34 @@ func (s *Service) Stat(ctx context.Context) (*StatResponse, error) {
 		if err != nil {
 			continue
 		}
+		if opts.FilterUserID != nil && info.OwnerUserID != *opts.FilterUserID {
+			continue
+		}
 		keyStat := KeyStat{
-			Key:        key,
-			Filename:   info.Filename,
-			MimeType:   info.MimeType,
-			ActiveRefs: activeRefs[key],
-			FileSize:   st.Size(),
-			Directory:  keyDir,
+			Key:         key,
+			Filename:    info.Filename,
+			MimeType:    info.MimeType,
+			OwnerUserID: info.OwnerUserID,
+			ActiveRefs:  activeRefs[key],
+			FileSize:    st.Size(),
+			Directory:   keyDir,
 		}
 		keys = append(keys, keyStat)
 		totalSize += st.Size()
 	}
 
+	activeOut := activeRefs
+	if opts.FilterUserID != nil {
+		activeOut = make(map[string]int)
+		for _, k := range keys {
+			activeOut[k.Key] = activeRefs[k.Key]
+		}
+	}
+
 	return &StatResponse{
 		TotalKeys:  len(keys),
 		TotalSize:  totalSize,
-		ActiveRefs: activeRefs,
+		ActiveRefs: activeOut,
 		Keys:       keys,
 	}, nil
 }

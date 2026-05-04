@@ -1,6 +1,6 @@
 // @title           Concierge API
 // @version         1.0
-// @description     A temporary file storage service with TTL support
+// @description     A temporary file storage service with TTL support and optional Google OAuth.
 
 // @contact.name   Homin Lee
 // @contact.url    https://github.com/suapapa
@@ -15,7 +15,12 @@
 // @securityDefinitions.apikey BearerAuth
 // @in header
 // @name Authorization
-// @description Type "Bearer" followed by a space and API token.
+// @description Type "Bearer" followed by a space: legacy admin token file contents, or a per-user key starting with `concierge_` from POST /api-keys (database mode).
+
+// @securityDefinitions.apikey SessionCookie
+// @in cookie
+// @name concierge_session
+// @description Opaque session cookie set after successful Google OAuth callback.
 
 package main
 
@@ -34,8 +39,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/suapapa/concierge/docs"
 	"github.com/suapapa/concierge/internal/activerefs"
+	"github.com/suapapa/concierge/internal/auth"
 	"github.com/suapapa/concierge/internal/config"
 	"github.com/suapapa/concierge/internal/luggage"
+	"github.com/suapapa/concierge/internal/store"
 	swaggerfiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 )
@@ -46,7 +53,9 @@ func main() {
 	flag.IntVar(&cfg.SizeLimit, "l", cfg.SizeLimit, "size limit in bytes")
 	flag.StringVar(&cfg.Port, "p", cfg.Port, "listen port")
 	flag.BoolVar(&cfg.Release, "r", cfg.Release, "release mode")
+	flag.StringVar(&cfg.TokenPath, "token", cfg.TokenPath, "path to legacy bearer token file")
 	flag.Parse()
+	cfg.ApplyEnv()
 
 	if err := cfg.Validate(); err != nil {
 		fmt.Fprintf(os.Stderr, "invalid config: %v\n", err)
@@ -64,22 +73,62 @@ func main() {
 	refStore := activerefs.NewStore(cfg.ActiveRefs, cfg.LockFile)
 	svc := luggage.NewService(appCtx, cfg.TmpDir, cfg.SizeLimit, refStore)
 
-	token, err := readBearerToken(cfg.TokenPath)
+	legacyToken, err := readBearerToken(cfg.TokenPath)
 	if err != nil {
 		log.Printf("token: %v", err)
 	}
 
-	r := newEngine(cfg.Release)
-	r.Use(authMiddleware(token))
-
-	h := &Handlers{Svc: svc}
-	api := r.Group("/api/v1")
-	{
-		api.POST("/luggage", h.PostLuggage)
-		api.GET("/luggage/:key", h.GetLuggage)
-		api.GET("/stat", h.GetStat)
-		api.GET("/health", h.GetHealth)
+	var st *store.Store
+	if cfg.DatabaseURL != "" {
+		st, err = store.Connect(appCtx, cfg.DatabaseURL)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "database: %v\n", err)
+			os.Exit(1)
+		}
+		defer st.Close()
+		if err := st.Migrate(appCtx); err != nil {
+			fmt.Fprintf(os.Stderr, "migrate: %v\n", err)
+			os.Exit(1)
+		}
 	}
+
+	h := &Handlers{
+		Svc:            svc,
+		Store:          st,
+		CookieSecure:   cfg.CookieSecure,
+	}
+
+	r := newEngine(cfg.Release)
+
+	api := r.Group("/api/v1")
+	api.GET("/health", h.GetHealth)
+	api.GET("/luggage/:key", h.GetLuggage)
+
+	if st != nil {
+		oauthH, err := auth.NewOAuth(appCtx, &cfg, st)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "oauth: %v\n", err)
+			os.Exit(1)
+		}
+		api.GET("/auth/google", oauthH.Start)
+		api.GET("/auth/google/callback", oauthH.Callback)
+	}
+
+	protected := api.Group("")
+	protected.Use(auth.RequireUserOrLegacy(legacyToken, st, st))
+	protected.POST("/luggage", h.PostLuggage)
+	protected.DELETE("/luggage/:key", h.DeleteLuggage)
+	protected.GET("/stat", h.GetStat)
+	protected.POST("/auth/logout", h.PostAuthLogout)
+	protected.GET("/api-keys", h.GetAPIKeys)
+	protected.POST("/api-keys", h.PostAPIKey)
+	protected.DELETE("/api-keys/:id", h.DeleteAPIKey)
+
+	admin := api.Group("/admin")
+	admin.Use(auth.RequireUserOrLegacy(legacyToken, st, st))
+	admin.Use(auth.RequireAdmin())
+	admin.GET("/users", h.AdminListUsers)
+	admin.PATCH("/users/:id", h.AdminPatchUserRole)
 
 	r.StaticFile("/", "web/index.html")
 
@@ -134,20 +183,4 @@ func newEngine(release bool) *gin.Engine {
 	}
 	r.Use(gin.Logger(), gin.Recovery())
 	return r
-}
-
-func authMiddleware(token string) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		if c.Request.Method == http.MethodGet || token == "" {
-			c.Next()
-			return
-		}
-		if c.GetHeader("Authorization") != "Bearer "+token {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
-			c.Abort()
-			return
-		}
-		log.Println("authorized")
-		c.Next()
-	}
 }

@@ -14,6 +14,8 @@ definitions:
         type: string
       mimeType:
         type: string
+      ownerUserId:
+        type: integer
     type: object
   luggage.SaveResponse:
     properties:
@@ -35,25 +37,273 @@ definitions:
       totalSize:
         type: integer
     type: object
+  main.CreateAPIKeyResponse:
+    properties:
+      createdAt:
+        type: string
+      id:
+        type: integer
+      key:
+        type: string
+      label:
+        type: string
+      prefix:
+        type: string
+    type: object
+  store.APIKeyMeta:
+    properties:
+      createdAt:
+        type: string
+      id:
+        type: integer
+      label:
+        type: string
+      lastUsedAt:
+        type: string
+      prefix:
+        type: string
+    type: object
+  store.User:
+    properties:
+      displayName:
+        type: string
+      email:
+        type: string
+      googleSub:
+        type: string
+      id:
+        type: integer
+      pictureUrl:
+        type: string
+      role:
+        description: '"admin" or "guest"'
+        type: string
+    type: object
 host: localhost:8080
 info:
   contact:
     email: ff4500@gmail.com
     name: Homin Lee
     url: https://github.com/suapapa
-  description: A temporary file storage service with TTL support
+  description: A temporary file storage service with TTL support and optional Google
+    OAuth.
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
   title: Concierge API
   version: "1.0"
 paths:
+  /admin/users:
+    get:
+      description: Returns all registered users and roles.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/store.User'
+            type: array
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List users
+      tags:
+      - admin
+  /admin/users/{id}:
+    patch:
+      consumes:
+      - application/json
+      description: Sets role to admin or guest. Cannot demote the last remaining admin.
+      parameters:
+      - description: User id
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Payload
+        in: body
+        name: body
+        required: true
+        schema:
+          type: object
+      responses:
+        "204":
+          description: No content
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Update user role
+      tags:
+      - admin
+  /api-keys:
+    get:
+      description: Returns metadata for keys owned by the current user. Secrets are
+        never listed.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/store.APIKeyMeta'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      - SessionCookie: []
+      summary: List API keys
+      tags:
+      - api-keys
+    post:
+      consumes:
+      - application/json
+      description: 'Generates a `concierge_…` secret. Use `Authorization: Bearer <key>`
+        on protected routes. Same role as the user (admin keys may call admin APIs).'
+      parameters:
+      - description: Optional label
+        in: body
+        name: body
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/main.CreateAPIKeyResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      - SessionCookie: []
+      summary: Create API key
+      tags:
+      - api-keys
+  /api-keys/{id}:
+    delete:
+      description: Removes a key by id if it belongs to the signed-in user.
+      parameters:
+      - description: API key id
+        in: path
+        name: id
+        required: true
+        type: integer
+      responses:
+        "204":
+          description: No content
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      - SessionCookie: []
+      summary: Delete API key
+      tags:
+      - api-keys
+  /auth/logout:
+    post:
+      description: Deletes the server-side session for the concierge_session cookie.
+      responses:
+        "204":
+          description: No content
+      security:
+      - BearerAuth: []
+      summary: Log out
+      tags:
+      - auth
   /health:
     get:
       consumes:
       - application/json
       description: Check if the service is healthy by verifying temporary directory
-        access and active refs file readability
+        access and active refs file readability. When a database is configured, pings
+        PostgreSQL.
       produces:
       - application/json
       responses:
@@ -76,8 +326,10 @@ paths:
     post:
       consumes:
       - multipart/form-data
-      description: 'Upload a file and get a unique key. The file will be automatically
-        deleted after TTL expires (default: 3 minutes) if there are no active references.'
+      description: 'Upload a file and get a unique key. Requires session cookie (after
+        Google login), `Authorization: Bearer concierge_…` user API key (database
+        mode), or legacy Bearer token. Owner is the logged-in user; legacy uploads
+        use owner 0.'
       parameters:
       - description: File to upload
         in: formData
@@ -121,10 +373,59 @@ paths:
             additionalProperties:
               type: string
             type: object
+      security:
+      - BearerAuth: []
       summary: Upload a file
       tags:
       - luggage
   /luggage/{key}:
+    delete:
+      description: Admins may delete any object; guests may delete only objects they
+        own (see ownerUserId in metadata). Legacy Bearer token behaves as admin.
+      parameters:
+      - description: File key
+        in: path
+        name: key
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No content
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Delete a file by key
+      tags:
+      - luggage
     get:
       consumes:
       - application/json
@@ -166,8 +467,8 @@ paths:
     get:
       consumes:
       - application/json
-      description: Get statistics about all stored files including total keys, total
-        size, active references, and details for each key
+      description: Admins and legacy Bearer see all keys. Guests see only their own
+        uploads. Requires session, user API key, or legacy Bearer.
       produces:
       - application/json
       responses:
@@ -175,19 +476,33 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/luggage.StatResponse'
-        "500":
-          description: Internal server error
+        "401":
+          description: Unauthorized
           schema:
             additionalProperties:
               type: string
             type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
       summary: Get statistics
       tags:
       - stat
 securityDefinitions:
   BearerAuth:
-    description: Type "Bearer" followed by a space and API token.
+    description: 'Type "Bearer" followed by a space: legacy admin token file contents,
+      or a per-user key starting with `concierge_` from POST /api-keys (database mode).'
     in: header
     name: Authorization
+    type: apiKey
+  SessionCookie:
+    description: Opaque session cookie set after successful Google OAuth callback.
+    in: cookie
+    name: concierge_session
     type: apiKey
 swagger: "2.0"

@@ -1,5 +1,6 @@
 .gitignore
 concierge
+.env
 
 .agents/
 skills-lock.json

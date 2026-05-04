@@ -7,18 +7,25 @@ type SaveResponse struct {
 
 // FileInfo is persisted next to the uploaded payload as info.yaml.
 type FileInfo struct {
-	MimeType string `yaml:"mimeType"`
-	Filename string `yaml:"filename"`
+	MimeType      string `yaml:"mimeType"`
+	Filename      string `yaml:"filename"`
+	OwnerUserID   int64  `yaml:"ownerUserId,omitempty"`
 }
 
 // KeyStat describes one stored object for the statistics endpoint.
 type KeyStat struct {
-	Key        string `json:"key"`
-	Filename   string `json:"filename"`
-	MimeType   string `json:"mimeType"`
-	ActiveRefs int    `json:"activeRefs"`
-	FileSize   int64  `json:"fileSize"`
-	Directory  string `json:"directory"`
+	Key           string `json:"key"`
+	Filename      string `json:"filename"`
+	MimeType      string `json:"mimeType"`
+	OwnerUserID   int64  `json:"ownerUserId"`
+	ActiveRefs    int    `json:"activeRefs"`
+	FileSize      int64  `json:"fileSize"`
+	Directory     string `json:"directory"`
+}
+
+// StatOptions filters Stat results. When FilterUserID is non-nil, only objects owned by that user id are included.
+type StatOptions struct {
+	FilterUserID *int64
 }
 
 // StatResponse aggregates storage and reference metrics.

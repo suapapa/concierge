@@ -1,0 +1,53 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    color-scheme: light dark;
+    -webkit-tap-highlight-color: rgba(0, 0, 0, 0.12);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    html {
+      -webkit-tap-highlight-color: rgba(255, 255, 255, 0.16);
+    }
+  }
+
+  body {
+    @apply bg-zinc-50 text-zinc-900 touch-manipulation;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    body {
+      @apply bg-zinc-950 text-zinc-100;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+
+  a:focus-visible,
+  button:focus-visible,
+  input:focus-visible,
+  summary:focus-visible {
+    @apply outline-none ring-2 ring-offset-2 ring-blue-600 ring-offset-zinc-50;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    a:focus-visible,
+    button:focus-visible,
+    input:focus-visible,
+    summary:focus-visible {
+      @apply ring-offset-zinc-950;
+    }
+  }
+}

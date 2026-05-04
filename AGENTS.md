@@ -13,7 +13,9 @@ If only one file seems affected (e.g. a new flag), still check the other for sta
 
 ## What this is
 
-**Concierge** is a small Gin HTTP service for temporary file hosting: uploads go under a configurable temp directory with per-object TTL, YAML sidecar metadata (`info.yaml`), and a file-backed active reference map so objects are not deleted while downloads are in progress.
+**Concierge** is a small Gin HTTP service for temporary file hosting: uploads go under a configurable temp directory with per-object TTL, YAML sidecar metadata (`info.yaml`, including `ownerUserId` when authenticated), and a file-backed active reference map so objects are not deleted while downloads are in progress.
+
+With **`CONCIERGE_DATABASE_URL`** set, the service adds **Google OAuth**, **PostgreSQL** (`users`, `sessions`, `api_keys`), **opaque session cookies** (`concierge_session`), **per-user API keys** (`concierge_…` bearer secrets, stored hashed), and **roles** (`admin` / `guest`). Downloads `GET /api/v1/luggage/:key` remain public for anyone with the key.
 
 Module path: `github.com/suapapa/concierge`.
 
@@ -21,13 +23,17 @@ Module path: `github.com/suapapa/concierge`.
 
 | Path | Role |
 |------|------|
-| `main.go` | Process entry: flags, signal-aware root `context`, HTTP server lifecycle, auth middleware, API group under `/api/v1`, root `GET /` from `web/index.html`, Swagger wiring in non-release mode |
-| `handler.go` | Gin handlers on `Handlers`; thin HTTP layer delegating to `internal/luggage` |
-| `web/` | Static site root (`index.html`); replace or extend as the frontend grows |
-| `internal/config` | Flag-driven `Config`, path derivation for active refs |
+| `main.go` | Process entry: flags, `config.ApplyEnv()`, signal-aware root `context`, HTTP routes: public `GET /luggage/:key`, OAuth, protected group (session, `Bearer concierge_…` API key, or legacy Bearer), `GET/POST/DELETE /api-keys`, admin group, Swagger in non-release mode |
+| `handler.go` | Gin handlers on `Handlers`; authz for delete/stat; admin user APIs |
+| `web/` | Static site root (`index.html`); lightweight landing page |
+| `fe/` | Vite + React + TypeScript dashboard: `GET /api/v1/stat`, upload, delete, API key UI, copy public URLs; `npm run dev` proxies `/api` to Concierge (see `fe/.env.example`) |
+| `internal/config` | `Config`, flags, `ApplyEnv()` for `CONCIERGE_*` variables |
+| `internal/store` | PostgreSQL pool, embedded migrations, user/session/API-key CRUD, `LookupAPIKey` |
+| `internal/auth` | Google OAuth start/callback, signed OAuth state (HMAC + `SESSION_SECRET`), `RequireUserOrLegacy` (legacy Bearer → API key → session) / `RequireAdmin` |
 | `internal/activerefs` | Advisory lock + YAML persistence for per-key download counts |
-| `internal/luggage` | Core behavior: upload, open/get lease, stats, health, TTL expiry goroutines tied to app `context` |
+| `internal/luggage` | Core behavior: upload (with owner), `ReadFileInfo`, `Delete`, open/get lease, stats (optional owner filter), health, TTL expiry goroutines tied to app `context` |
 | `docs/` | Generated Swagger (`swag`); do not hand-edit `docs/docs.go` |
+| `docker-compose.yml` | Local **PostgreSQL**; optional **`concierge`** service via `--profile app`. Compose reads repo-root **`.env`** for `${CONCIERGE_*}` interpolation (or **`docker compose --env-file …`**). |
 
 New application logic belongs under `internal/`; keep `main` and handlers as wiring unless there is a strong reason to grow them.
 
@@ -39,14 +45,16 @@ go test -race ./...
 golangci-lint run ./...   # or: make lint
 ```
 
-Regenerate API docs after changing handler Swagger comments or `internal/luggage` types referenced in annotations:
+Frontend (`fe/`): `npm install`, `npm run dev`, `npm run build` (TypeScript check + Vite bundle to `fe/dist/`).
+
+Regenerate API docs after changing handler Swagger comments or `internal/luggage` / `internal/store` types referenced in annotations:
 
 ```sh
 make swagger
 # requires: go install github.com/swaggo/swag/cmd/swag@latest
 ```
 
-`swag init` **must** include `--parseInternal` (see `Makefile`) so definitions under `internal/luggage` resolve.
+`swag init` **must** include `--parseInternal` (see `Makefile`) so definitions under `internal/` resolve.
 
 ## Conventions
 
@@ -58,8 +66,10 @@ make swagger
 
 ## Configuration surface
 
-- CLI flags: `-t` temp dir, `-l` max upload bytes, `-p` port, `-r` release mode (see `main.go` / README).
-- Optional bearer token: `main` reads `Config.TokenPath` (default `/secret/token` from `internal/config.Default()`). There is no `-token` flag yet; add one in `main` if needed. Missing or empty token file disables auth on non-GET requests.
+- CLI flags: `-t` temp dir, `-l` max upload bytes, `-p` port, `-r` release mode, `-token` legacy bearer token file path (see `main.go` / README).
+- Environment: `CONCIERGE_*` — see `internal/config/env.go` and README for `DATABASE_URL`, Google OAuth, `SESSION_SECRET`, `BOOTSTRAP_ADMIN_EMAILS`, `SESSION_TTL`, `POST_LOGIN_REDIRECT`, `COOKIE_SECURE`, `TMP_DIR`, `TOKEN_PATH`.
+- **Legacy bearer token**: optional file at `-token` / `TokenPath` default `/secret/token`. When present, its value is matched first against `Authorization: Bearer …` and, if it matches, the request is treated as **admin** (user id 0 for uploads). In DB mode, non-matching `Bearer` values starting with `concierge_` are looked up as **user API keys** (role from `users.role`); otherwise the **session cookie** is used. Missing or empty token file means no legacy token.
+- **Migrations**: Embedded SQL under `internal/store/migrations`; `Store.Migrate` runs on startup when the database is enabled. Migrations use `IF NOT EXISTS` so they are safe to re-run.
 
 ## Skills / deeper Go guidance
 

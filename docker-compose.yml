@@ -1,0 +1,44 @@
+# Local PostgreSQL for Concierge. Start DB only:
+#   docker compose up -d
+# Full stack (requires Google OAuth env in shell or .env):
+#   docker compose --profile app up --build
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: concierge
+      POSTGRES_PASSWORD: concierge
+      POSTGRES_DB: concierge
+    ports:
+      - "5432:5432"
+    volumes:
+      - concierge_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U concierge -d concierge"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  concierge:
+    profiles: ["app"]
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      CONCIERGE_DATABASE_URL: postgres://concierge:concierge@postgres:5432/concierge?sslmode=disable
+      CONCIERGE_GOOGLE_CLIENT_ID: ${CONCIERGE_GOOGLE_CLIENT_ID}
+      CONCIERGE_GOOGLE_CLIENT_SECRET: ${CONCIERGE_GOOGLE_CLIENT_SECRET}
+      CONCIERGE_OAUTH_REDIRECT_URL: ${CONCIERGE_OAUTH_REDIRECT_URL:-http://localhost:8080/api/v1/auth/google/callback}
+      CONCIERGE_SESSION_SECRET: ${CONCIERGE_SESSION_SECRET}
+      CONCIERGE_BOOTSTRAP_ADMIN_EMAILS: ${CONCIERGE_BOOTSTRAP_ADMIN_EMAILS:-}
+      CONCIERGE_COOKIE_SECURE: "false"
+      CONCIERGE_TMP_DIR: /tmp/concierge
+    volumes:
+      - concierge_data:/tmp/concierge
+
+volumes:
+  concierge_pg:
+  concierge_data:
