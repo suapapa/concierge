@@ -36,6 +36,7 @@ Module path: `github.com/suapapa/concierge`.
 | `internal/luggage` | Core behavior: upload (with owner), `ReadFileInfo`, `Delete`, open/get lease, stats (optional owner filter), health, TTL expiry goroutines tied to app `context` |
 | `docs/` | Generated Swagger (`swag`); do not hand-edit `docs/docs.go` |
 | `docker-compose.yml` | Local **PostgreSQL**; optional **`concierge`** service via `--profile app`. Compose reads repo-root **`.env`** for `${CONCIERGE_*}` interpolation (or **`docker compose --env-file …`**); copy **`.env.sample`** to `.env` and fill secrets. Both services use **`restart: unless-stopped`** so they come back after a host reboot unless you stopped them explicitly. |
+| `.github/workflows/docker-publish.yml` | On **push to `main`**, **Buildx** + **QEMU** publish a **multi-arch** image (**`linux/amd64`**, **`linux/arm64`**) from the root **`Dockerfile`** to **`ghcr.io/<owner>/<repo>`** with tags **`latest`**, **`main`**, **`sha-<commit>`** (**`GITHUB_TOKEN`**). |
 
 New application logic belongs under `internal/`; keep `main` and handlers as wiring unless there is a strong reason to grow them.
 

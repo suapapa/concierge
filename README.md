@@ -59,6 +59,7 @@ Do not commit `.env`. The runtime image runs **`docker-entrypoint.sh`**: it crea
 
 | Goal | Command / note |
 |------|----------------|
+| Prebuilt image (after merge to `main`) | **`docker pull ghcr.io/suapapa/concierge:latest`** — multi-arch (**`linux/amd64`**, **`linux/arm64`**); tags also include `main`, `sha-<abbrev>`. [.github/workflows/docker-publish.yml](.github/workflows/docker-publish.yml). Forks use `ghcr.io/<your-org>/concierge`. Private repos may need `docker login ghcr.io` or a public package. |
 | Build binary | `go build -o concierge` |
 | Local binary | `./concierge` — defaults: port **8080**, temp **`/tmp/concierge`**, max upload **10 MiB** |
 | Build image only | `docker build -t concierge .` |
