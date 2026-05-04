@@ -143,7 +143,7 @@ func main() {
 	if staticui.Mount(r, cfg.StaticUIDir, cfg.Release) {
 		log.Printf("serving dashboard static files from %s", cfg.StaticUIDir)
 	} else {
-		r.StaticFile("/", "web/index.html")
+		log.Printf("dashboard static UI not found at %s (build with: cd fe && npm run build)", cfg.StaticUIDir)
 	}
 
 	addr := ":" + cfg.Port

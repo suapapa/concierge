@@ -25,7 +25,6 @@ Module path: `github.com/suapapa/concierge`.
 |------|------|
 | `main.go` | Process entry: flags, `config.ApplyEnv()`, signal-aware root `context`, HTTP routes: public `GET /luggage/:key`, OAuth, protected group (session, `Bearer concierge_…` API key, or legacy Bearer), `GET/POST/DELETE /api-keys`, admin group (`GET/PATCH /admin/users`), Swagger in non-release mode |
 | `handler.go` | Gin handlers on `Handlers`; authz for delete/stat; upload quota checks (DB users); admin user/quota APIs |
-| `web/` | Fallback root (`index.html`) when `fe/dist/index.html` is absent |
 | `internal/staticui` | Serves Vite `fe/dist` at `/` and `/assets`; `NoRoute` SPA fallback (skips `/api/…`, `/swagger…`, `/docs` in dev) |
 | `fe/` | Vite + React + TypeScript dashboard: `GET /api/v1/stat`, upload, delete, API key UI, copy public URLs, admin “Users & quotas” when `GET /admin/users` succeeds; `npm run dev` proxies `/api` to Concierge (see `fe/.env.example`) |
 | `fe/public/` | Root static assets (favicon, Apple touch icon); Vite copies into `fe/dist` on build (`index.html` links them under `/`) |
@@ -61,12 +60,12 @@ make swagger
 
 ## Conventions
 
-- **Static UI**: Default bundle path `fe/dist` (override `CONCIERGE_STATIC_UI_DIR`). If `index.html` is missing there, `GET /` uses `web/index.html`.
+- **Static UI**: Default bundle path `fe/dist` (override `CONCIERGE_STATIC_UI_DIR`). If `index.html` is missing there, `GET /` is not registered until the bundle exists (`cd fe && npm run build`).
 - **Context**: Blocking/domain boundaries accept `context.Context`; background work uses the process-level context cancelled on SIGINT/SIGTERM.
 - **Errors**: Prefer sentinel errors in `internal/luggage` (e.g. `ErrNotFound`) and `errors.Is` in handlers for HTTP status mapping. Wrap with `%w` where appropriate.
 - **Keys**: Luggage keys are restricted to safe characters (alphanumeric, `_`, `-`); reject path segments and `..`.
 - **Concurrency**: TTL cleanup goroutines must respect cancellation; do not spawn unbounded goroutines without a clear shutdown path.
-- **Docker**: Multi-stage build runs `npm ci` + `npm run build` in `fe/`, copies **`fe/dist`** into the Go builder, then the runtime image ships the binary, **`web/`**, and **`fe/dist`**. The container starts as **root** only for **`docker-entrypoint.sh`**, which `mkdir -p` + `chown`s **`CONCIERGE_TMP_DIR`** (default `/app/concierge_archive`) so named/bind volumes are writable by **`appuser`**, then **`su-exec`** runs **`./concierge`**. `GET /` serves the React bundle when `fe/dist/index.html` exists. The Go builder still runs `swag init ... --parseInternal`; adding packages only under `internal/` does not require Dockerfile path tweaks beyond the `fe` stage if `fe/` dependencies change.
+- **Docker**: Multi-stage build runs `npm ci` + `npm run build` in `fe/`, copies **`fe/dist`** into the Go builder, then the runtime image ships the binary and **`fe/dist`**. The container starts as **root** only for **`docker-entrypoint.sh`**, which `mkdir -p` + `chown`s **`CONCIERGE_TMP_DIR`** (default `/app/concierge_archive`) so named/bind volumes are writable by **`appuser`**, then **`su-exec`** runs **`./concierge`**. `GET /` serves the React bundle when `fe/dist/index.html` exists. The Go builder still runs `swag init ... --parseInternal`; adding packages only under `internal/` does not require Dockerfile path tweaks beyond the `fe` stage if `fe/` dependencies change.
 
 ## Configuration surface
 

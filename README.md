@@ -31,7 +31,7 @@ Services use `restart: unless-stopped` (they come back after a reboot unless you
 
 ### App + database (recommended)
 
-1. Copy **`.env.sample`** to **`.env`** and set at least:
+1. Copy **`_env.sample`** to **`.env`** and set at least:
 
    - `CONCIERGE_GOOGLE_CLIENT_ID`
    - `CONCIERGE_GOOGLE_CLIENT_SECRET`
@@ -79,7 +79,7 @@ Proxies **`/api`** to **`http://127.0.0.1:8080`** by default (`fe/.env.example`)
 
 ## API sketch
 
-Base path: **`/api/v1`**. If **`fe/dist/index.html`** is missing at startup, **`/`** serves **`web/index.html`**.
+Base path: **`/api/v1`**. The dashboard is the Vite bundle under **`fe/dist/`** (or **`CONCIERGE_STATIC_UI_DIR`**); if **`index.html`** is missing there at startup, **`GET /`** is not served until you run **`npm run build`** in **`fe/`**.
 
 ```sh
 # Upload (anonymous or with auth as above)

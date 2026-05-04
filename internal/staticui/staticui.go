@@ -12,7 +12,7 @@ import (
 
 // Mount serves the UI from root (a directory containing index.html).
 // It registers GET /, static files under /assets when root/assets exists, and NoRoute SPA fallback.
-// Returns false if root/index.html is missing (use a plain landing page instead).
+// Returns false if root/index.html is missing (caller may log; GET / stays unregistered).
 func Mount(r *gin.Engine, root string, release bool) bool {
 	index := filepath.Join(root, "index.html")
 	st, err := os.Stat(index)

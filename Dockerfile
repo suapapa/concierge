@@ -33,7 +33,6 @@ RUN apk --no-cache add ca-certificates su-exec && \
 WORKDIR /app
 
 COPY --from=builder /app/concierge .
-COPY --from=builder /app/web ./web
 COPY --from=builder /app/fe/dist ./fe/dist
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 

@@ -571,11 +571,6 @@ export default function App() {
                 Continue With Google
               </a>
             </p>
-            <p className="mt-3 text-xs text-zinc-500 dark:text-zinc-500">
-              Set <code className="rounded bg-zinc-100 px-1 py-0.5 text-zinc-800 dark:bg-zinc-800 dark:text-zinc-200" translate="no">CONCIERGE_POST_LOGIN_REDIRECT</code>{' '}
-              to this app’s URL (for example <span translate="no">http://localhost:5173/</span>) so you return here after
-              OAuth.
-            </p>
           </section>
         )}
 
