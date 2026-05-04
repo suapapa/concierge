@@ -42,6 +42,7 @@ import (
 	"github.com/suapapa/concierge/internal/auth"
 	"github.com/suapapa/concierge/internal/config"
 	"github.com/suapapa/concierge/internal/luggage"
+	"github.com/suapapa/concierge/internal/staticui"
 	"github.com/suapapa/concierge/internal/store"
 	swaggerfiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
@@ -131,14 +132,18 @@ func main() {
 	admin.GET("/users", h.AdminListUsers)
 	admin.PATCH("/users/:id", h.AdminPatchUser)
 
-	r.StaticFile("/", "web/index.html")
-
 	if !cfg.Release {
 		docs.SwaggerInfo.BasePath = "/api/v1"
 		r.GET("/docs", func(c *gin.Context) {
 			c.Redirect(http.StatusFound, "/swagger/index.html")
 		})
 		r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerfiles.Handler))
+	}
+
+	if staticui.Mount(r, cfg.StaticUIDir, cfg.Release) {
+		log.Printf("serving dashboard static files from %s", cfg.StaticUIDir)
+	} else {
+		r.StaticFile("/", "web/index.html")
 	}
 
 	addr := ":" + cfg.Port

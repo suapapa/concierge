@@ -4,8 +4,121 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Concierge</title>
+  <style>
+    :root {
+      --bg: #fafafa;
+      --surface: #fff;
+      --text: #18181b;
+      --muted: #71717a;
+      --border: #e4e4e7;
+      --accent: #2563eb;
+      --accent-hover: #1d4ed8;
+      --code-bg: #f4f4f5;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #09090b;
+        --surface: #18181b;
+        --text: #fafafa;
+        --muted: #a1a1aa;
+        --border: #27272a;
+        --accent: #3b82f6;
+        --accent-hover: #60a5fa;
+        --code-bg: #27272a;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+    .wrap {
+      max-width: 42rem;
+      margin: 0 auto;
+      padding: clamp(1.5rem, 5vw, 3rem) 1.25rem;
+    }
+    h1 {
+      font-size: clamp(1.75rem, 4vw, 2.25rem);
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin: 0 0 0.5rem;
+    }
+    .lede {
+      color: var(--muted);
+      font-size: 1.05rem;
+      margin: 0 0 2rem;
+    }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.25rem 1.35rem;
+      margin-bottom: 1rem;
+    }
+    .card h2 {
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin: 0 0 0.75rem;
+    }
+    .card p { margin: 0 0 0.75rem; }
+    .card p:last-child { margin-bottom: 0; }
+    code, .mono {
+      font-family: ui-monospace, "Cascadia Code", "SF Mono", Menlo, Consolas, monospace;
+      font-size: 0.9em;
+      background: var(--code-bg);
+      padding: 0.15em 0.4em;
+      border-radius: 6px;
+    }
+    a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+    a:hover { color: var(--accent-hover); text-decoration: underline; }
+    ul {
+      margin: 0;
+      padding-left: 1.25rem;
+    }
+    li { margin: 0.35em 0; }
+    .note {
+      font-size: 0.9rem;
+      color: var(--muted);
+    }
+  </style>
 </head>
 <body>
-  <p>Concierge UI placeholder. REST API is under <code>/api/v1</code>.</p>
+  <div class="wrap">
+    <h1>Concierge</h1>
+    <p class="lede">Temporary file hosting with TTL, public download links, and optional Google sign-in when the database is enabled.</p>
+
+    <div class="card">
+      <h2>API</h2>
+      <p>Versioned REST handlers live under <code>/api/v1</code> (for example <a href="/api/v1/health">GET /api/v1/health</a>).</p>
+      <p class="note">Upload, delete, and listing require auth (session cookie, user API key, or legacy bearer token). Public downloads use the luggage key URL from your deployment.</p>
+    </div>
+
+    <div class="card">
+      <h2>API explorer</h2>
+      <p>With the server <strong>not</strong> in release mode (<code>-r</code> omitted), Swagger UI is at <a href="/swagger/index.html">/swagger/index.html</a> (shortcut <a href="/docs">/docs</a>).</p>
+      <p class="note">Release builds omit Swagger routes.</p>
+    </div>
+
+    <div class="card">
+      <h2>Full dashboard</h2>
+      <p>You are seeing this page because <code>fe/dist/index.html</code> was not found when the server started. To serve the React app at <code>/</code>, run <code>cd fe &amp;&amp; npm install &amp;&amp; npm run build</code> and restart Concierge (or use the Docker image, which includes the bundle).</p>
+      <p>For local UI development with hot reload:</p>
+      <ul>
+        <li><code>cd fe &amp;&amp; npm run dev</code> — Vite (default <code class="mono">http://localhost:5173</code>) proxies <code>/api</code> to this server.</li>
+      </ul>
+      <p class="note">When using Vite on another origin, set <code>CONCIERGE_POST_LOGIN_REDIRECT</code> to that URL for OAuth (see README).</p>
+    </div>
+  </div>
 </body>
 </html>

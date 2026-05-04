@@ -11,7 +11,7 @@ A web application for temporarily hosting files publicly. Files are automaticall
 - **Active reference tracking**: Files won't be deleted while they're being downloaded
 - **Configurable TTL**: Set custom expiration time per file
 - **MIME type support**: Preserve or override file MIME types
-- **Size limit**: Configurable file size limit (default: 5MB)
+- **Size limit**: Configurable file size limit (default 10 MiB; in database mode it matches the default single-file quota for new users)
 - **Optional Google login**: Multi-user mode with PostgreSQL, roles (`admin` / `guest`), and opaque sessions
 - **Per-object ownership**: Each upload records `ownerUserId` in `info.yaml` for delete/stat scoping
 - **Per-user API keys** (database mode): `concierge_…` secrets; `Authorization: Bearer` on protected routes; create/list/revoke via API or the `fe/` dashboard
@@ -31,23 +31,27 @@ go build -o concierge
 docker build -t concierge .
 ```
 
+The runtime image uses **`docker-entrypoint.sh`**: it ensures **`CONCIERGE_TMP_DIR`** exists (default **`/app/concierge_archive`** when unset) and **`chown`s** it to the non-root **`appuser`** before starting the binary. That avoids **permission denied** on `active_refs.lock` and uploads when you attach a **Docker volume** or bind mount that is owned by root.
+
+If you override **`CONCIERGE_TMP_DIR`**, point it at a path the entrypoint can create and `chown` (or pre-create with correct ownership yourself).
+
 ## Usage
 
 ### Start the server
 
 ```sh
-# Default settings (port 8080, temp dir /tmp/concierge, 5MB limit)
+# Default settings (port 8080, temp dir /tmp/concierge, 10 MiB upload cap)
 ./concierge
 
 # Custom configuration
-./concierge -p 9000 -t /tmp/myfiles -l 10485760  # 10MB limit
+./concierge -p 9000 -t /tmp/myfiles -l 52428800  # ~50 MiB limit
 ```
 
 **Command-line flags:**
 
 - `-p`: Port number (default: 8080)
 - `-t`: Temporary directory path (default: /tmp/concierge)
-- `-l`: File size limit in bytes (default: 5242880 = 5MB)
+- `-l`: File size limit in bytes (default: 10485760 = 10 MiB; with PostgreSQL this matches the default per-user single-file quota)
 - `-r`: Release mode (quieter Gin, no Swagger UI)
 - `-token`: Path to legacy bearer token file (default: /secret/token)
 
@@ -74,8 +78,9 @@ Protected routes try the legacy file token first (if configured), then a `concie
 | `SESSION_SECRET` | Yes | At least 16 characters; used to sign OAuth `state` |
 | `BOOTSTRAP_ADMIN_EMAILS` | No | Comma-separated emails; first login for each gets `admin` |
 | `SESSION_TTL` | No | Session lifetime (Go duration, default `168h`) |
-| `POST_LOGIN_REDIRECT` | No | Path after login (default `/`; must start with `/`). When using the Vite app in `fe/`, set this to that origin (for example `http://localhost:5173/`) so OAuth returns to the dashboard. |
+| `POST_LOGIN_REDIRECT` | No | Path after login (default `/`; must start with `/`). When using `npm run dev` in `fe/` on another origin (for example `http://localhost:5173/`), set this to that URL so OAuth returns to the dev server. When the production bundle is served from `/` (see `STATIC_UI_DIR`), `/` is usually correct. |
 | `COOKIE_SECURE` | No | `true` / `1` to set `Secure` on cookies (use behind HTTPS) |
+| `STATIC_UI_DIR` | No | Directory containing `index.html` from `fe/`’s Vite build (default `fe/dist`). If that file exists at startup, `GET /` and other non-API browser paths serve the React app; otherwise the server uses `web/index.html` at `/`. |
 
 **Roles:**
 
@@ -155,11 +160,11 @@ cd fe
 npm run build
 ```
 
-writes static assets to **`fe/dist/`** for deployment behind any static file host or reverse proxy that forwards `/api` to Concierge.
+writes static assets to **`fe/dist/`**. Files in **`fe/public/`** (favicon and touch icon, derived from **`_img/logo.png`**) are copied next to **`index.html`** in **`fe/dist/`**. The Go server can serve that directory at **`/`** (same origin as **`/api/v1`**) when it exists at process start, so you can run **`./concierge`** alone without a separate static host.
 
 ### API base URL
 
-HTTP handlers live under **`/api/v1`**. The site root **`/`** serves the static landing page (`web/index.html`).
+HTTP handlers live under **`/api/v1`**. The site root **`/`** serves the **`fe/`** production bundle when **`fe/dist/index.html`** is present (after `npm run build` in `fe/`, or in the Docker image); otherwise it serves the static landing page **`web/index.html`**. Override the bundle directory with **`CONCIERGE_STATIC_UI_DIR`**.
 
 ### Upload a file
 
@@ -281,5 +286,5 @@ Code changes that affect behavior, flags, APIs, or how the project is built or r
 - Each file gets its own directory named after its key
 - The server uses file locking to handle concurrent access in multi-instance deployments
 - Default TTL is 3 minutes if not specified
-- Maximum file size is 5MB by default (configurable via `-l`)
+- Maximum file size defaults to 10 MiB (configurable via `-l`; in DB mode the effective cap per upload is still the lesser of `-l` and the user’s single-file quota)
 - SQL migrations are embedded under `internal/store/migrations` and applied on startup when `DATABASE_URL` is set

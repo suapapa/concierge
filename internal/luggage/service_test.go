@@ -3,6 +3,7 @@ package luggage
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -128,6 +129,33 @@ func TestService_Delete(t *testing.T) {
 	}
 	if _, err := svc.ReadFileInfo(context.Background(), resp.Key); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("ReadFileInfo err = %v; want ErrNotFound", err)
+	}
+}
+
+func TestService_Stat_emptyKeysJSONIsArrayNotNull(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	ctx := context.Background()
+	store := activerefs.NewStore(filepath.Join(dir, "active_refs.yaml"), filepath.Join(dir, "active_refs.lock"))
+	svc := NewService(ctx, dir, 1024, store)
+
+	stat, err := svc.Stat(ctx, StatOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stat.TotalKeys != 0 {
+		t.Fatalf("TotalKeys=%d want 0", stat.TotalKeys)
+	}
+	raw, err := json.Marshal(stat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatal(err)
+	}
+	if string(out["keys"]) != "[]" {
+		t.Fatalf("JSON keys field = %s; want empty array [] for dashboard clients", string(out["keys"]))
 	}
 }
 

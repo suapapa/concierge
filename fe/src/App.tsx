@@ -390,7 +390,8 @@ export default function App() {
       setBanner({ tone: 'error', text: r.error ?? 'Could not load your files.' });
       return;
     }
-    setStat(r.data);
+    // Older servers JSON-encoded an empty file list as keys: null; normalize for the UI.
+    setStat({ ...r.data, keys: r.data.keys ?? [] });
     const ak = await fetchApiKeys();
     if (ak.ok && ak.data) {
       setApiKeys(ak.data);

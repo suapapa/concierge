@@ -25,8 +25,10 @@ Module path: `github.com/suapapa/concierge`.
 |------|------|
 | `main.go` | Process entry: flags, `config.ApplyEnv()`, signal-aware root `context`, HTTP routes: public `GET /luggage/:key`, OAuth, protected group (session, `Bearer concierge_…` API key, or legacy Bearer), `GET/POST/DELETE /api-keys`, admin group (`GET/PATCH /admin/users`), Swagger in non-release mode |
 | `handler.go` | Gin handlers on `Handlers`; authz for delete/stat; upload quota checks (DB users); admin user/quota APIs |
-| `web/` | Static site root (`index.html`); lightweight landing page |
+| `web/` | Fallback root (`index.html`) when `fe/dist/index.html` is absent |
+| `internal/staticui` | Serves Vite `fe/dist` at `/` and `/assets`; `NoRoute` SPA fallback (skips `/api/…`, `/swagger…`, `/docs` in dev) |
 | `fe/` | Vite + React + TypeScript dashboard: `GET /api/v1/stat`, upload, delete, API key UI, copy public URLs, admin “Users & quotas” when `GET /admin/users` succeeds; `npm run dev` proxies `/api` to Concierge (see `fe/.env.example`) |
+| `fe/public/` | Root static assets (favicon, Apple touch icon); Vite copies into `fe/dist` on build (`index.html` links them under `/`) |
 | `internal/config` | `Config`, flags, `ApplyEnv()` for `CONCIERGE_*` variables |
 | `internal/store` | PostgreSQL pool, embedded migrations, user/session/API-key CRUD, `LookupAPIKey`, per-user quotas + daily upload reservation |
 | `internal/auth` | Google OAuth start/callback, signed OAuth state (HMAC + `SESSION_SECRET`), `RequireUserOrLegacy` (legacy Bearer → API key → session) / `RequireAdmin` |
@@ -58,16 +60,17 @@ make swagger
 
 ## Conventions
 
+- **Static UI**: Default bundle path `fe/dist` (override `CONCIERGE_STATIC_UI_DIR`). If `index.html` is missing there, `GET /` uses `web/index.html`.
 - **Context**: Blocking/domain boundaries accept `context.Context`; background work uses the process-level context cancelled on SIGINT/SIGTERM.
 - **Errors**: Prefer sentinel errors in `internal/luggage` (e.g. `ErrNotFound`) and `errors.Is` in handlers for HTTP status mapping. Wrap with `%w` where appropriate.
 - **Keys**: Luggage keys are restricted to safe characters (alphanumeric, `_`, `-`); reject path segments and `..`.
 - **Concurrency**: TTL cleanup goroutines must respect cancellation; do not spawn unbounded goroutines without a clear shutdown path.
-- **Docker**: The build stage uses `COPY . .` and `swag init ... --parseInternal`; adding packages only under `internal/` does not require Dockerfile path tweaks. The runtime image copies the binary plus `web/` so `GET /` can serve `web/index.html`.
+- **Docker**: Multi-stage build runs `npm ci` + `npm run build` in `fe/`, copies **`fe/dist`** into the Go builder, then the runtime image ships the binary, **`web/`**, and **`fe/dist`**. The container starts as **root** only for **`docker-entrypoint.sh`**, which `mkdir -p` + `chown`s **`CONCIERGE_TMP_DIR`** (default `/app/concierge_archive`) so named/bind volumes are writable by **`appuser`**, then **`su-exec`** runs **`./concierge`**. `GET /` serves the React bundle when `fe/dist/index.html` exists. The Go builder still runs `swag init ... --parseInternal`; adding packages only under `internal/` does not require Dockerfile path tweaks beyond the `fe` stage if `fe/` dependencies change.
 
 ## Configuration surface
 
-- CLI flags: `-t` temp dir, `-l` max upload bytes, `-p` port, `-r` release mode, `-token` legacy bearer token file path (see `main.go` / README).
-- Environment: `CONCIERGE_*` — see `internal/config/env.go` and README for `DATABASE_URL`, Google OAuth, `SESSION_SECRET`, `BOOTSTRAP_ADMIN_EMAILS`, `SESSION_TTL`, `POST_LOGIN_REDIRECT`, `COOKIE_SECURE`, `TMP_DIR`, `TOKEN_PATH`.
+- CLI flags: `-t` temp dir, `-l` max upload bytes (default equals `internal/store.DefaultMaxSingleFileBytes`, 10 MiB, so it does not undercut new-user DB single-file quotas; tighten with `-l` for a lower global ceiling), `-p` port, `-r` release mode, `-token` legacy bearer token file path (see `main.go` / README).
+- Environment: `CONCIERGE_*` — see `internal/config/env.go` and README for `DATABASE_URL`, Google OAuth, `SESSION_SECRET`, `BOOTSTRAP_ADMIN_EMAILS`, `SESSION_TTL`, `POST_LOGIN_REDIRECT`, `COOKIE_SECURE`, `STATIC_UI_DIR`, `TMP_DIR`, `TOKEN_PATH`.
 - **Legacy bearer token**: optional file at `-token` / `TokenPath` default `/secret/token`. When present, its value is matched first against `Authorization: Bearer …` and, if it matches, the request is treated as **admin** (user id 0 for uploads). In DB mode, non-matching `Bearer` values starting with `concierge_` are looked up as **user API keys** (role from `users.role`); otherwise the **session cookie** is used. Missing or empty token file means no legacy token.
 - **Migrations**: Embedded SQL under `internal/store/migrations`; `Store.Migrate` runs on startup when the database is enabled. Migrations use `IF NOT EXISTS` so they are safe to re-run.
 

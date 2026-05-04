@@ -1,52 +1,45 @@
-# Build stage
+# Frontend (Vite) production bundle
+FROM node:22-alpine AS fe
+WORKDIR /app/fe
+COPY fe/package.json fe/package-lock.json ./
+RUN npm ci
+COPY fe/ ./
+RUN npm run build
+
+# Go binary + Swagger
 FROM golang:1.25-alpine AS builder
 
-# 작업 디렉터리 설정
 WORKDIR /app
 
-# 의존성 파일 복사
 COPY go.mod go.sum ./
-
-# 의존성 다운로드
 RUN go mod download
 
-# swag 설치 (swagger 문서 생성용)
 RUN go install github.com/swaggo/swag/cmd/swag@latest
 
-# 소스 코드 복사
 COPY . .
+COPY --from=fe /app/fe/dist ./fe/dist
 
-# Swagger 문서 생성
 RUN swag init -g main.go -o docs --parseInternal
 
-# 바이너리 빌드
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o concierge .
 
-# Runtime stage
+# Runtime
 FROM alpine:latest
 
-# 보안을 위한 non-root 사용자 추가
-RUN apk --no-cache add ca-certificates && \
+RUN apk --no-cache add ca-certificates su-exec && \
     addgroup -S appgroup && \
     adduser -S appuser -G appgroup
 
 WORKDIR /app
 
-# 빌더에서 바이너리 복사
 COPY --from=builder /app/concierge .
-
-# 루트 랜딩 (main.go: StaticFile("/", "web/index.html"))
 COPY --from=builder /app/web ./web
+COPY --from=builder /app/fe/dist ./fe/dist
+COPY docker-entrypoint.sh /docker-entrypoint.sh
 
-# 소유권 변경
-RUN chown -R appuser:appgroup /app
+RUN chown -R appuser:appgroup /app && chmod +x /docker-entrypoint.sh
 
-# non-root 사용자로 전환
-USER appuser
-
-# 포트 노출
 EXPOSE 8080
 
-# 애플리케이션 실행
+ENTRYPOINT ["/docker-entrypoint.sh"]
 CMD ["./concierge"]
-

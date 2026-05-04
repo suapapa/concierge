@@ -327,7 +327,8 @@ func (s *Service) Stat(ctx context.Context, opts StatOptions) (*StatResponse, er
 		return nil, fmt.Errorf("read tmp dir: %w", err)
 	}
 
-	var keys []KeyStat
+	// Non-nil slice so JSON encodes as [] not null (React expects keys to be an array).
+	keys := make([]KeyStat, 0)
 	var totalSize int64
 	for _, entry := range entries {
 		if !entry.IsDir() {

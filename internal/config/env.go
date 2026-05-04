@@ -45,6 +45,9 @@ func (c *Config) ApplyEnv() {
 	if v := os.Getenv(envPrefix + "COOKIE_SECURE"); v != "" {
 		c.CookieSecure = strings.EqualFold(v, "1") || strings.EqualFold(v, "true") || strings.EqualFold(v, "yes")
 	}
+	if v := os.Getenv(envPrefix + "STATIC_UI_DIR"); v != "" {
+		c.StaticUIDir = v
+	}
 }
 
 func parseEmailList(s string) []string {

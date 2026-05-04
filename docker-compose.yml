@@ -37,9 +37,9 @@ services:
       CONCIERGE_SESSION_SECRET: ${CONCIERGE_SESSION_SECRET}
       CONCIERGE_BOOTSTRAP_ADMIN_EMAILS: ${CONCIERGE_BOOTSTRAP_ADMIN_EMAILS:-}
       CONCIERGE_COOKIE_SECURE: "false"
-      CONCIERGE_TMP_DIR: /tmp/concierge
+      CONCIERGE_TMP_DIR: /app/concierge_archive
     volumes:
-      - concierge_data:/tmp/concierge
+      - concierge_data:/app/concierge_archive
 
 volumes:
   concierge_pg:

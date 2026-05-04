@@ -5,13 +5,14 @@ import (
 	"fmt"
 	"path/filepath"
 	"time"
+
+	"github.com/suapapa/concierge/internal/store"
 )
 
 const (
-	defaultTmpDir    = "/tmp/concierge"
-	defaultSizeLimit = 5 * 1024 * 1024 // 5 MiB
-	defaultPort      = "8080"
-	defaultTokenPath = "/secret/token"
+	defaultTmpDir = "./concierge_archive/"
+	defaultPort   = "8080"
+	defaultTokenPath  = "/secret/token"
 	defaultSessionTTL = 7 * 24 * time.Hour
 )
 
@@ -40,6 +41,9 @@ type Config struct {
 	PostLoginRedirect string
 	// CookieSecure sets the Secure flag on auth cookies (use true behind HTTPS).
 	CookieSecure bool
+	// StaticUIDir is the directory with the Vite production bundle (index.html, assets/).
+	// When that index.html exists at startup, GET / and client routes serve the React app.
+	StaticUIDir string
 }
 
 // Validate checks required fields and returns an error if the config is unusable.
@@ -68,13 +72,16 @@ func (c *Config) Validate() error {
 // Default returns baseline defaults before flag parsing overrides them.
 func Default() Config {
 	return Config{
-		TmpDir:               defaultTmpDir,
-		SizeLimit:            defaultSizeLimit,
-		Port:                 defaultPort,
-		Release:              false,
-		TokenPath:            defaultTokenPath,
-		SessionTTL:           defaultSessionTTL,
-		PostLoginRedirect:    "/",
+		TmpDir:            defaultTmpDir,
+		// Align with store.DefaultMaxSingleFileBytes so min(-l, per-user) does not
+		// undercut new-user DB quotas; operators still tighten with -l.
+		SizeLimit:         int(store.DefaultMaxSingleFileBytes),
+		Port:              defaultPort,
+		Release:           false,
+		TokenPath:         defaultTokenPath,
+		SessionTTL:        defaultSessionTTL,
+		PostLoginRedirect: "/",
+		StaticUIDir:       "fe/dist",
 	}
 }
 
