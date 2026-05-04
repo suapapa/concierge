@@ -3,6 +3,8 @@ name: Docker image
 on:
   push:
     branches: [main]
+    tags:
+      - "**"
 
 concurrency:
   group: docker-publish-${{ github.workflow }}-${{ github.ref }}
@@ -46,6 +48,7 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
             type=ref,event=branch
             type=sha,prefix=
+            type=ref,event=tag
 
       - name: Build and push
         uses: docker/build-push-action@v6
