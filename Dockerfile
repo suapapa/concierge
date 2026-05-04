@@ -14,11 +14,10 @@ RUN go mod download
 RUN go install github.com/swaggo/swag/cmd/swag@latest
 
 # 소스 코드 복사
-COPY go.mod go.sum ./
-COPY *.go ./
+COPY . .
 
 # Swagger 문서 생성
-RUN swag init -g main.go -o docs
+RUN swag init -g main.go -o docs --parseInternal
 
 # 바이너리 빌드
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o concierge .

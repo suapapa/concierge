@@ -1,6 +1,6 @@
 basePath: /
 definitions:
-  main.KeyStat:
+  luggage.KeyStat:
     properties:
       activeRefs:
         type: integer
@@ -15,12 +15,12 @@ definitions:
       mimeType:
         type: string
     type: object
-  main.SaveResponse:
+  luggage.SaveResponse:
     properties:
       key:
         type: string
     type: object
-  main.StatResponse:
+  luggage.StatResponse:
     properties:
       activeRefs:
         additionalProperties:
@@ -28,7 +28,7 @@ definitions:
         type: object
       keys:
         items:
-          $ref: '#/definitions/main.KeyStat'
+          $ref: '#/definitions/luggage.KeyStat'
         type: array
       totalKeys:
         type: integer
@@ -43,8 +43,8 @@ info:
     url: https://github.com/suapapa
   description: A temporary file storage service with TTL support
   license:
-    name: Apache 2.0
-    url: http://www.apache.org/licenses/LICENSE-2.0.html
+    name: MIT
+    url: https://opensource.org/licenses/MIT
   title: Concierge API
   version: "1.0"
 paths:
@@ -102,7 +102,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/main.SaveResponse'
+            $ref: '#/definitions/luggage.SaveResponse'
         "400":
           description: Bad request (file required or size exceeds limit)
           schema:
@@ -174,7 +174,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/main.StatResponse'
+            $ref: '#/definitions/luggage.StatResponse'
         "500":
           description: Internal server error
           schema:

@@ -110,6 +110,10 @@ curl http://localhost:8080/luggage/$KEY -o downloaded.pdf
 4. If no active references exist, the file is deleted. If downloads are in progress, deletion is delayed until all downloads complete
 5. Active reference counting ensures files aren't deleted while being served
 
+## Documentation maintenance
+
+Code changes that affect behavior, flags, APIs, or how the project is built or run should be reflected **immediately** in **`README.md`** (this file) and **`AGENTS.md`** (guidance for coding agents). Update both in the same change whenever practical so they do not drift from the codebase.
+
 ## Notes
 
 - Files are stored in the temporary directory specified by the `-t` flag

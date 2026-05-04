@@ -20,98 +20,129 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
-	"path/filepath"
+	"os/signal"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/suapapa/concierge/docs"
+	"github.com/suapapa/concierge/internal/activerefs"
+	"github.com/suapapa/concierge/internal/config"
+	"github.com/suapapa/concierge/internal/luggage"
 	swaggerfiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 )
 
-const tokenPath = "/secret/token"
-
-var (
-	flagTmpDir    = "/tmp/concierge"
-	flagSizeLimit = 1024 * 1024 * 5 // 5MB
-	flagPort      = "8080"
-	flagRelease   = false
-
-	// 활성 파일 참조 추적 파일 경로
-	activeRefsFile string
-	// 락 파일 경로
-	activeRefsLockFile string
-)
-
 func main() {
-	flag.StringVar(&flagTmpDir, "t", flagTmpDir, "temporary directory")
-	flag.IntVar(&flagSizeLimit, "l", flagSizeLimit, "size limit")
-	flag.StringVar(&flagPort, "p", flagPort, "port")
-	flag.BoolVar(&flagRelease, "r", flagRelease, "release mode")
+	cfg := config.Default()
+	flag.StringVar(&cfg.TmpDir, "t", cfg.TmpDir, "temporary directory")
+	flag.IntVar(&cfg.SizeLimit, "l", cfg.SizeLimit, "size limit in bytes")
+	flag.StringVar(&cfg.Port, "p", cfg.Port, "listen port")
+	flag.BoolVar(&cfg.Release, "r", cfg.Release, "release mode")
 	flag.Parse()
 
-	if err := os.MkdirAll(flagTmpDir, 0755); err != nil {
-		fmt.Printf("error: failed to create temporary directory: %v\n", err)
+	if err := cfg.Validate(); err != nil {
+		fmt.Fprintf(os.Stderr, "invalid config: %v\n", err)
 		os.Exit(1)
 	}
 
-	// activeRefs 파일 경로 설정
-	activeRefsFile = filepath.Join(flagTmpDir, "active_refs.yaml")
-	// 락 파일 경로 설정
-	activeRefsLockFile = filepath.Join(flagTmpDir, "active_refs.lock")
-
-	r := gin.New()
-	if flagRelease {
-		gin.SetMode(gin.ReleaseMode)
-		r.Use(gin.Recovery())
-	} else {
-		r.Use(gin.Logger())
-		r.Use(gin.Recovery())
+	if err := os.MkdirAll(cfg.TmpDir, 0o755); err != nil {
+		fmt.Fprintf(os.Stderr, "create temporary directory: %v\n", err)
+		os.Exit(1)
 	}
 
-	var token string
-	tokenBytes, err := os.ReadFile(tokenPath)
+	appCtx, stopApp := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopApp()
+
+	refStore := activerefs.NewStore(cfg.ActiveRefs, cfg.LockFile)
+	svc := luggage.NewService(appCtx, cfg.TmpDir, cfg.SizeLimit, refStore)
+
+	token, err := readBearerToken(cfg.TokenPath)
 	if err != nil {
-		log.Printf("Failed to read secret from %s: %v", tokenPath, err)
-	} else {
-		token = strings.TrimSpace(string(tokenBytes))
+		log.Printf("token: %v", err)
 	}
 
-	r.Use(func(c *gin.Context) {
-		if c.Request.Method == "GET" || token == "" {
-			c.Next()
-			return
-		}
+	r := newEngine(cfg.Release)
+	r.Use(authMiddleware(token))
 
-		if c.GetHeader("Authorization") != "Bearer "+token {
-			c.JSON(401, gin.H{"error": "Unauthorized"})
-			c.Abort()
-			return
-		}
+	h := &Handlers{Svc: svc}
+	r.POST("/luggage", h.PostLuggage)
+	r.GET("/luggage/:key", h.GetLuggage)
+	r.GET("/stat", h.GetStat)
+	r.GET("/health", h.GetHealth)
 
-		log.Println("authorized")
-		c.Next()
-	})
-
-	r.POST("/luggage", PostLuggageHandler)
-	r.GET("/luggage/:key", GetLuggageHandler)
-	r.GET("/stat", GetStatHandler)
-	r.GET("/health", GetHealthHandler)
-
-	if !flagRelease {
+	if !cfg.Release {
 		docs.SwaggerInfo.BasePath = "/"
 		r.GET("/docs", func(c *gin.Context) {
-			c.Redirect(302, "/swagger/index.html")
+			c.Redirect(http.StatusFound, "/swagger/index.html")
 		})
 		r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerfiles.Handler))
 	}
 
-	if err := r.Run(":" + flagPort); err != nil {
-		fmt.Printf("error: failed to start server: %v\n", err)
-		os.Exit(1)
+	addr := ":" + cfg.Port
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           r,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+
+	go func() {
+		log.Printf("listening on %s", addr)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Printf("server: %v", err)
+			stopApp()
+		}
+	}()
+
+	<-appCtx.Done()
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("graceful shutdown: %v", err)
+	}
+}
+
+func readBearerToken(path string) (string, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", fmt.Errorf("read %s: %w", path, err)
+	}
+	return strings.TrimSpace(string(b)), nil
+}
+
+func newEngine(release bool) *gin.Engine {
+	r := gin.New()
+	if release {
+		gin.SetMode(gin.ReleaseMode)
+		r.Use(gin.Recovery())
+		return r
+	}
+	r.Use(gin.Logger(), gin.Recovery())
+	return r
+}
+
+func authMiddleware(token string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if c.Request.Method == http.MethodGet || token == "" {
+			c.Next()
+			return
+		}
+		if c.GetHeader("Authorization") != "Bearer "+token {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+			c.Abort()
+			return
+		}
+		log.Println("authorized")
+		c.Next()
 	}
 }

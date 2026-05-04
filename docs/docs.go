@@ -15,8 +15,8 @@ const docTemplate = `{
             "email": "ff4500@gmail.com"
         },
         "license": {
-            "name": "Apache 2.0",
-            "url": "http://www.apache.org/licenses/LICENSE-2.0.html"
+            "name": "MIT",
+            "url": "https://opensource.org/licenses/MIT"
         },
         "version": "{{.Version}}"
     },
@@ -102,7 +102,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/main.SaveResponse"
+                            "$ref": "#/definitions/luggage.SaveResponse"
                         }
                     },
                     "400": {
@@ -208,7 +208,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/main.StatResponse"
+                            "$ref": "#/definitions/luggage.StatResponse"
                         }
                     },
                     "500": {
@@ -225,7 +225,7 @@ const docTemplate = `{
         }
     },
     "definitions": {
-        "main.KeyStat": {
+        "luggage.KeyStat": {
             "type": "object",
             "properties": {
                 "activeRefs": {
@@ -248,7 +248,7 @@ const docTemplate = `{
                 }
             }
         },
-        "main.SaveResponse": {
+        "luggage.SaveResponse": {
             "type": "object",
             "properties": {
                 "key": {
@@ -256,7 +256,7 @@ const docTemplate = `{
                 }
             }
         },
-        "main.StatResponse": {
+        "luggage.StatResponse": {
             "type": "object",
             "properties": {
                 "activeRefs": {
@@ -268,7 +268,7 @@ const docTemplate = `{
                 "keys": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/main.KeyStat"
+                        "$ref": "#/definitions/luggage.KeyStat"
                     }
                 },
                 "totalKeys": {

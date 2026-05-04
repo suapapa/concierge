@@ -9,8 +9,8 @@
             "email": "ff4500@gmail.com"
         },
         "license": {
-            "name": "Apache 2.0",
-            "url": "http://www.apache.org/licenses/LICENSE-2.0.html"
+            "name": "MIT",
+            "url": "https://opensource.org/licenses/MIT"
         },
         "version": "1.0"
     },
@@ -96,7 +96,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/main.SaveResponse"
+                            "$ref": "#/definitions/luggage.SaveResponse"
                         }
                     },
                     "400": {
@@ -202,7 +202,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/main.StatResponse"
+                            "$ref": "#/definitions/luggage.StatResponse"
                         }
                     },
                     "500": {
@@ -219,7 +219,7 @@
         }
     },
     "definitions": {
-        "main.KeyStat": {
+        "luggage.KeyStat": {
             "type": "object",
             "properties": {
                 "activeRefs": {
@@ -242,7 +242,7 @@
                 }
             }
         },
-        "main.SaveResponse": {
+        "luggage.SaveResponse": {
             "type": "object",
             "properties": {
                 "key": {
@@ -250,7 +250,7 @@
                 }
             }
         },
-        "main.StatResponse": {
+        "luggage.StatResponse": {
             "type": "object",
             "properties": {
                 "activeRefs": {
@@ -262,7 +262,7 @@
                 "keys": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/main.KeyStat"
+                        "$ref": "#/definitions/luggage.KeyStat"
                     }
                 },
                 "totalKeys": {
