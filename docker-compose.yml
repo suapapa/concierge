@@ -4,7 +4,7 @@
 #   docker compose --profile app up --build
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:18-alpine
     restart: unless-stopped
     environment:
       POSTGRES_USER: concierge
@@ -13,7 +13,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - concierge_pg:/var/lib/postgresql/data
+      - concierge_pg:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U concierge -d concierge"]
       interval: 3s

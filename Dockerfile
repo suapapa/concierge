@@ -1,5 +1,5 @@
 # Frontend (Vite) production bundle
-FROM node:22-alpine AS fe
+FROM node:24-alpine AS fe
 WORKDIR /app/fe
 COPY fe/package.json fe/package-lock.json ./
 RUN npm ci
@@ -7,7 +7,7 @@ COPY fe/ ./
 RUN npm run build
 
 # Go binary + Swagger
-FROM golang:1.25-alpine AS builder
+FROM golang:1.26-alpine AS builder
 
 WORKDIR /app
 
