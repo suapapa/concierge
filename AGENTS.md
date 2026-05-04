@@ -6,7 +6,7 @@ Guidance for coding agents working in this repository.
 
 Whenever a change alters **user-visible behavior**, **HTTP APIs**, **CLI flags**, **defaults**, **build or run steps**, **project layout**, or **conventions** documented here or in `README.md`, update **`AGENTS.md`** and **`README.md` in the same editing session / pull request** so both stay accurate. Treat doc updates as part of the code change, not optional follow-up.
 
-- **`README.md`**: end-user facing overview, install/usage examples, feature list.
+- **`README.md`**: end-user overview; Docker Compose quick start, then shorter alternatives and pointers to `.env.sample` / `internal/config/env.go`.
 - **`AGENTS.md`**: agent-oriented architecture, commands, and repo conventions.
 
 If only one file seems affected (e.g. a new flag), still check the other for stale references (flags, paths, endpoints) and fix them.
@@ -70,7 +70,7 @@ make swagger
 ## Configuration surface
 
 - CLI flags: `-t` temp dir, `-l` max upload bytes (default equals `internal/store.DefaultMaxSingleFileBytes`, 10 MiB, so it does not undercut new-user DB single-file quotas; tighten with `-l` for a lower global ceiling), `-p` port, `-r` release mode, `-token` legacy bearer token file path (see `main.go` / README).
-- Environment: `CONCIERGE_*` — see `internal/config/env.go` and README for `DATABASE_URL`, Google OAuth, `SESSION_SECRET`, `BOOTSTRAP_ADMIN_EMAILS`, `SESSION_TTL`, `POST_LOGIN_REDIRECT`, `COOKIE_SECURE`, `STATIC_UI_DIR`, `TMP_DIR`, `TOKEN_PATH`.
+- Environment: `CONCIERGE_*` — see `internal/config/env.go`, `.env.sample`, and README (Compose quick start) for `DATABASE_URL`, Google OAuth, `SESSION_SECRET`, `BOOTSTRAP_ADMIN_EMAILS`, `SESSION_TTL`, `POST_LOGIN_REDIRECT`, `COOKIE_SECURE`, `STATIC_UI_DIR`, `TMP_DIR`, `TOKEN_PATH`.
 - **Legacy bearer token**: optional file at `-token` / `TokenPath` default `/secret/token`. When present, its value is matched first against `Authorization: Bearer …` and, if it matches, the request is treated as **admin** (user id 0 for uploads). In DB mode, non-matching `Bearer` values starting with `concierge_` are looked up as **user API keys** (role from `users.role`); otherwise the **session cookie** is used. Missing or empty token file means no legacy token.
 - **Migrations**: Embedded SQL under `internal/store/migrations`; `Store.Migrate` runs on startup when the database is enabled. Migrations use `IF NOT EXISTS` so they are safe to re-run.
 
