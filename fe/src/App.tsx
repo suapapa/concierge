@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
   createApiKey,
   deleteApiKey,
@@ -158,6 +158,17 @@ function formatBytes(n: number): string {
     minimumFractionDigits: 0,
   }).format(v);
   return `${num}\u00A0${units[i]}`;
+}
+
+function formatExpiryAt(iso: string | undefined, dateTimeFormat: Intl.DateTimeFormat): string {
+  if (!iso) {
+    return '—';
+  }
+  const ms = Date.parse(iso);
+  if (!Number.isFinite(ms)) {
+    return '—';
+  }
+  return dateTimeFormat.format(new Date(ms));
 }
 
 function CopyLinkButton({ url }: { url: string }) {
@@ -369,6 +380,10 @@ export default function App() {
   const [newKeyDialog, setNewKeyDialog] = useState<CreateAPIKeyResponse | null>(null);
   const [adminUsers, setAdminUsers] = useState<UserRow[] | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const expiryDateFmt = useMemo(
+    () => new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }),
+    [],
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -797,6 +812,9 @@ export default function App() {
                           Size
                         </th>
                         <th scope="col" className="px-3 py-2 font-medium text-zinc-700 dark:text-zinc-300">
+                          Expires
+                        </th>
+                        <th scope="col" className="px-3 py-2 font-medium text-zinc-700 dark:text-zinc-300">
                           Active Refs
                         </th>
                         <th scope="col" className="px-3 py-2 font-medium text-zinc-700 dark:text-zinc-300">
@@ -829,6 +847,12 @@ export default function App() {
                             </td>
                             <td className="whitespace-nowrap px-3 py-2 tabular-nums text-zinc-800 dark:text-zinc-200">
                               {formatBytes(row.fileSize)}
+                            </td>
+                            <td
+                              className="whitespace-nowrap px-3 py-2 tabular-nums text-zinc-800 dark:text-zinc-200"
+                              title={row.expiresAt ? row.expiresAt : undefined}
+                            >
+                              {formatExpiryAt(row.expiresAt, expiryDateFmt)}
                             </td>
                             <td className="whitespace-nowrap px-3 py-2 tabular-nums text-zinc-800 dark:text-zinc-200">
                               {nfCount.format(row.activeRefs)}

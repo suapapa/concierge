@@ -647,6 +647,9 @@ const docTemplate = `{
                 "directory": {
                     "type": "string"
                 },
+                "expiresAt": {
+                    "type": "string"
+                },
                 "fileSize": {
                     "type": "integer"
                 },

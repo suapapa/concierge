@@ -125,7 +125,13 @@ func (s *Service) Upload(ctx context.Context, p UploadParams) (*SaveResponse, er
 		return nil, ErrPayloadTooLarge
 	}
 
-	info := FileInfo{MimeType: p.MIMEType, Filename: p.Filename, OwnerUserID: p.OwnerUserID}
+	expiresAt := time.Now().UTC().Add(p.TTL).Format(time.RFC3339Nano)
+	info := FileInfo{
+		MimeType:    p.MIMEType,
+		Filename:    p.Filename,
+		OwnerUserID: p.OwnerUserID,
+		ExpiresAt:   expiresAt,
+	}
 	infoData, err := yaml.Marshal(info)
 	if err != nil {
 		cleanup()
@@ -361,6 +367,7 @@ func (s *Service) Stat(ctx context.Context, opts StatOptions) (*StatResponse, er
 			ActiveRefs:  activeRefs[key],
 			FileSize:    st.Size(),
 			Directory:   keyDir,
+			ExpiresAt:   info.ExpiresAt,
 		}
 		keys = append(keys, keyStat)
 		totalSize += st.Size()

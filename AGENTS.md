@@ -13,7 +13,7 @@ If only one file seems affected (e.g. a new flag), still check the other for sta
 
 ## What this is
 
-**Concierge** is a small Gin HTTP service for temporary file hosting: uploads go under a configurable temp directory with per-object TTL, YAML sidecar metadata (`info.yaml`, including `ownerUserId` when authenticated), and a file-backed active reference map so objects are not deleted while downloads are in progress.
+**Concierge** is a small Gin HTTP service for temporary file hosting: uploads go under a configurable temp directory with per-object TTL, YAML sidecar metadata (`info.yaml`, including `ownerUserId` when authenticated, `expiresAt` RFC3339Nano UTC set on new uploads), and a file-backed active reference map so objects are not deleted while downloads are in progress.
 
 With **`CONCIERGE_DATABASE_URL`** set, the service adds **Google OAuth**, **PostgreSQL** (`users`, `sessions`, `api_keys`, `user_daily_uploads` for quota counters), **opaque session cookies** (`concierge_session`), **per-user API keys** (`concierge_…` bearer secrets, stored hashed), **roles** (`admin` / `guest`), and **per-user upload quotas** on `users` (pool size, single-file max, daily upload count; UTC day). Downloads `GET /api/v1/luggage/:key` remain public for anyone with the key.
 

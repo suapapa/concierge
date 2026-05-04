@@ -85,6 +85,9 @@ Base path: **`/api/v1`**. The dashboard is the Vite bundle under **`fe/dist/`** 
 # Upload (anonymous or with auth as above)
 curl -s -X POST http://localhost:8080/api/v1/luggage -F "file=@example.txt" -F "ttl=5"
 
+# List your objects (session / API key / legacy bearer as configured); each key may include `expiresAt`
+curl -s http://localhost:8080/api/v1/stat
+
 # Download (public)
 curl -O http://localhost:8080/api/v1/luggage/KEY
 ```

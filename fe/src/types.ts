@@ -6,6 +6,8 @@ export type KeyStat = {
   activeRefs: number;
   fileSize: number;
   directory: string;
+  /** RFC3339Nano UTC from server; omitted for objects uploaded before sidecar stored `expiresAt`. */
+  expiresAt?: string;
 };
 
 export type StatResponse = {

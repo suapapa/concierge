@@ -46,6 +46,21 @@ func TestService_Upload_stat_roundTrip(t *testing.T) {
 	if stat.TotalSize != 5 {
 		t.Fatalf("totalSize=%d", stat.TotalSize)
 	}
+	if len(stat.Keys) != 1 {
+		t.Fatalf("keys len=%d", len(stat.Keys))
+	}
+	if stat.Keys[0].ExpiresAt == "" {
+		t.Fatal("missing expiresAt on stat key")
+	}
+	exp, err := time.Parse(time.RFC3339Nano, stat.Keys[0].ExpiresAt)
+	if err != nil {
+		t.Fatalf("parse expiresAt: %v", err)
+	}
+	skew := 15 * time.Second
+	ttl := time.Until(exp)
+	if ttl <= 0 || ttl > time.Hour+skew || ttl < time.Hour-skew {
+		t.Fatalf("expiresAt TTL until=%v want ~1h", ttl)
+	}
 }
 
 func TestService_Upload_rejectsOversizedBody(t *testing.T) {
