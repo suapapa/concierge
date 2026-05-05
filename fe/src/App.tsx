@@ -15,6 +15,14 @@ import type { APIKeyMeta, CreateAPIKeyResponse, KeyStat, StatResponse, UserRow }
 
 const MIB_BYTES = 1024 * 1024;
 
+/** Compact table label; full key remains in tooltip via title. */
+function formatLuggageKeyShort(key: string): string {
+  if (key.length <= 5) {
+    return key;
+  }
+  return `...${key.slice(-5)}`;
+}
+
 function AdminUserQuotaRow({ u, onSaved }: { u: UserRow; onSaved: () => Promise<void> }) {
   const [role, setRole] = useState(u.role);
   const [poolMiB, setPoolMiB] = useState(String(Math.max(1, Math.round(u.maxPoolBytes / MIB_BYTES))));
@@ -830,9 +838,9 @@ export default function App() {
                         const url = publicLuggageUrl(row.key);
                         return (
                           <tr key={row.key}>
-                            <td className="max-w-[14rem] min-w-0 px-3 py-2 font-mono text-xs text-zinc-800 dark:text-zinc-200">
-                              <span className="block truncate" translate="no" title={row.key}>
-                                {row.key}
+                            <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-zinc-800 dark:text-zinc-200">
+                              <span translate="no" title={row.key}>
+                                {formatLuggageKeyShort(row.key)}
                               </span>
                             </td>
                             <td className="max-w-[12rem] min-w-0 px-3 py-2 text-zinc-800 dark:text-zinc-200">
@@ -861,7 +869,7 @@ export default function App() {
                               {nfCount.format(row.ownerUserId)}
                             </td>
                             <td className="px-3 py-2">
-                              <div className="flex flex-wrap gap-2">
+                              <div className="flex flex-nowrap gap-2">
                                 <a
                                   href={`${url}?download=true`}
                                   className="inline-flex rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs font-medium text-zinc-800 transition hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800"
