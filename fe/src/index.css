@@ -38,6 +38,8 @@
   a:focus-visible,
   button:focus-visible,
   input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible,
   summary:focus-visible {
     @apply outline-none ring-2 ring-offset-2 ring-blue-600 ring-offset-zinc-50;
   }
@@ -46,6 +48,8 @@
     a:focus-visible,
     button:focus-visible,
     input:focus-visible,
+    select:focus-visible,
+    textarea:focus-visible,
     summary:focus-visible {
       @apply ring-offset-zinc-950;
     }

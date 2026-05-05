@@ -8,7 +8,7 @@ Temporary public file hosting: each upload gets a key and TTL stored as **`lugga
 
 - TTL-based cleanup via **`expires_at` sweeps** (configurable interval; set interval **`0`** to rely only on an external job) with active-download protection (DB-backed ref counts across instances)  
 - **Google OAuth + PostgreSQL**: sessions, `concierge_…` API keys, admin/guest, per-user quotas; object metadata in the database (payload bytes stay on disk)  
-- **React UI** in the image at `/` when built (`fe/` → `fe/dist`)  
+- **React UI** in the image at `/` when built (`fe/` → `fe/dist`), with a dedicated **Settings** view (API keys and admin user quotas) reachable from the header icon next to **Sign Out**  
 - Public downloads: `GET /api/v1/luggage/:key` (anyone with the key)
 
 ## Quick start: Docker Compose

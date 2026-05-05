@@ -20,7 +20,7 @@ function formatLuggageKeyShort(key: string): string {
   if (key.length <= 5) {
     return key;
   }
-  return `...${key.slice(-5)}`;
+  return `…${key.slice(-5)}`;
 }
 
 function AdminUserQuotaRow({ u, onSaved }: { u: UserRow; onSaved: () => Promise<void> }) {
@@ -84,6 +84,8 @@ function AdminUserQuotaRow({ u, onSaved }: { u: UserRow; onSaved: () => Promise<
       </td>
       <td className="px-3 py-2">
         <select
+          name={`role-${u.id}`}
+          autoComplete="off"
           className="w-full min-w-[5.5rem] rounded border border-zinc-300 bg-white px-2 py-1 text-xs dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
           value={role}
           onChange={(e) => setRole(e.target.value)}
@@ -96,9 +98,12 @@ function AdminUserQuotaRow({ u, onSaved }: { u: UserRow; onSaved: () => Promise<
       </td>
       <td className="px-3 py-2">
         <input
+          name={`max-pool-mib-${u.id}`}
           type="number"
           min={1}
           step={1}
+          inputMode="numeric"
+          autoComplete="off"
           className="w-20 rounded border border-zinc-300 bg-white px-2 py-1 text-xs tabular-nums dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
           value={poolMiB}
           onChange={(e) => setPoolMiB(e.target.value)}
@@ -108,9 +113,12 @@ function AdminUserQuotaRow({ u, onSaved }: { u: UserRow; onSaved: () => Promise<
       </td>
       <td className="px-3 py-2">
         <input
+          name={`max-single-mib-${u.id}`}
           type="number"
           min={1}
           step={1}
+          inputMode="numeric"
+          autoComplete="off"
           className="w-20 rounded border border-zinc-300 bg-white px-2 py-1 text-xs tabular-nums dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
           value={singleMiB}
           onChange={(e) => setSingleMiB(e.target.value)}
@@ -120,9 +128,12 @@ function AdminUserQuotaRow({ u, onSaved }: { u: UserRow; onSaved: () => Promise<
       </td>
       <td className="px-3 py-2">
         <input
+          name={`daily-max-uploads-${u.id}`}
           type="number"
           min={1}
           step={1}
+          inputMode="numeric"
+          autoComplete="off"
           className="w-16 rounded border border-zinc-300 bg-white px-2 py-1 text-xs tabular-nums dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
           value={daily}
           onChange={(e) => setDaily(e.target.value)}
@@ -202,6 +213,24 @@ function CopyLinkButton({ url }: { url: string }) {
     >
       {copied ? 'Copied' : 'Copy Link'}
     </button>
+  );
+}
+
+function SettingsIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className={className}
+    >
+      <circle cx="12" cy="12" r="3.2" />
+      <path d="M19.4 15a1 1 0 0 0 .2 1.1l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1 1 0 0 0-1.1-.2 1 1 0 0 0-.6.9V20a2 2 0 1 1-4 0v-.2a1 1 0 0 0-.6-.9 1 1 0 0 0-1.1.2l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1 1 0 0 0 .2-1.1 1 1 0 0 0-.9-.6H4a2 2 0 1 1 0-4h.2a1 1 0 0 0 .9-.6 1 1 0 0 0-.2-1.1l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1 1 0 0 0 1.1.2h.1a1 1 0 0 0 .6-.9V4a2 2 0 1 1 4 0v.2a1 1 0 0 0 .6.9h.1a1 1 0 0 0 1.1-.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1 1 0 0 0-.2 1.1v.1a1 1 0 0 0 .9.6H20a2 2 0 1 1 0 4h-.2a1 1 0 0 0-.9.6z" />
+    </svg>
   );
 }
 
@@ -387,6 +416,7 @@ export default function App() {
   const [revokeKeyBusy, setRevokeKeyBusy] = useState<number | null>(null);
   const [newKeyDialog, setNewKeyDialog] = useState<CreateAPIKeyResponse | null>(null);
   const [adminUsers, setAdminUsers] = useState<UserRow[] | null>(null);
+  const [activePage, setActivePage] = useState<'files' | 'settings'>('files');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const expiryDateFmt = useMemo(
     () => new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }),
@@ -400,6 +430,7 @@ export default function App() {
     setLoading(false);
     if (r.status === 401) {
       setAuthRequired(true);
+      setActivePage('files');
       setStat(null);
       setApiKeys([]);
       setAdminUsers(null);
@@ -540,21 +571,36 @@ export default function App() {
 
       <header className="flex flex-col gap-4 border-b border-zinc-200 pb-6 dark:border-zinc-800 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-balance text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">Your Files</h1>
+          <h1 className="text-balance text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
+            {activePage === 'settings' ? 'Settings' : 'Your Files'}
+          </h1>
           <p className="mt-1 max-w-xl text-sm text-zinc-600 dark:text-zinc-400">
-            Upload temporary luggage, copy a public link, and remove items you no longer need. Guests only see their own
-            uploads; admins see every key on the server.
+            {activePage === 'settings'
+              ? 'Manage API keys and, for admins, per-user roles and quota limits.'
+              : 'Upload temporary luggage, copy a public link, and remove items you no longer need. Guests only see their own uploads; admins see every key on the server.'}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {!authRequired && stat && (
-            <button
-              type="button"
-              className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50 active:bg-zinc-100 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800"
-              onClick={() => void onLogout()}
-            >
-              Sign Out
-            </button>
+            <>
+              <button
+                type="button"
+                className="inline-flex items-center gap-2 rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50 active:bg-zinc-100 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800"
+                onClick={() => setActivePage((prev) => (prev === 'files' ? 'settings' : 'files'))}
+                aria-label={activePage === 'settings' ? 'Go to files page' : 'Go to settings page'}
+                title={activePage === 'settings' ? 'Back to files' : 'Settings'}
+              >
+                <SettingsIcon className="h-4 w-4" />
+                <span>{activePage === 'settings' ? 'Files' : 'Settings'}</span>
+              </button>
+              <button
+                type="button"
+                className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50 active:bg-zinc-100 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800"
+                onClick={() => void onLogout()}
+              >
+                Sign Out
+              </button>
+            </>
           )}
         </div>
       </header>
@@ -599,7 +645,9 @@ export default function App() {
 
         {!authRequired && !loading && stat && (
           <>
-            <section className="rounded-lg border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900" aria-labelledby="upload-heading">
+            {activePage === 'files' && (
+              <>
+                <section className="rounded-lg border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900" aria-labelledby="upload-heading">
               <h2 id="upload-heading" className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
                 Upload A File
               </h2>
@@ -648,11 +696,122 @@ export default function App() {
                   </button>
                 </div>
               </form>
-            </section>
+                </section>
 
-            <section className="rounded-lg border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900" aria-labelledby="api-keys-heading">
+                <section aria-labelledby="files-heading">
+                  <div className="flex flex-wrap items-end justify-between gap-3">
+                    <h2 id="files-heading" className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
+                      Your Luggage
+                    </h2>
+                    <p className="text-sm tabular-nums text-zinc-600 dark:text-zinc-400">
+                      {nfCount.format(stat.totalKeys)} files · {formatBytes(stat.totalSize)} total
+                    </p>
+                  </div>
+
+                  {stat.keys.length === 0 ? (
+                    <p className="mt-4 rounded-lg border border-dashed border-zinc-300 bg-zinc-50 px-4 py-8 text-center text-sm text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900/40 dark:text-zinc-400">
+                      No files yet… Upload above to add your first object.
+                    </p>
+                  ) : (
+                    <div className="mt-4 overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
+                      <table className="min-w-full divide-y divide-zinc-200 text-left text-sm dark:divide-zinc-800">
+                        <thead className="bg-zinc-50 dark:bg-zinc-900/80">
+                          <tr>
+                            <th scope="col" className="px-3 py-2 font-medium text-zinc-700 dark:text-zinc-300">
+                              Key
+                            </th>
+                            <th scope="col" className="px-3 py-2 font-medium text-zinc-700 dark:text-zinc-300">
+                              Name
+                            </th>
+                            <th scope="col" className="px-3 py-2 font-medium text-zinc-700 dark:text-zinc-300">
+                              MIME
+                            </th>
+                            <th scope="col" className="px-3 py-2 font-medium text-zinc-700 dark:text-zinc-300">
+                              Size
+                            </th>
+                            <th scope="col" className="px-3 py-2 font-medium text-zinc-700 dark:text-zinc-300">
+                              Expires
+                            </th>
+                            <th scope="col" className="px-3 py-2 font-medium text-zinc-700 dark:text-zinc-300">
+                              Active Refs
+                            </th>
+                            <th scope="col" className="px-3 py-2 font-medium text-zinc-700 dark:text-zinc-300">
+                              Owner ID
+                            </th>
+                            <th scope="col" className="px-3 py-2 font-medium text-zinc-700 dark:text-zinc-300">
+                              Actions
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-zinc-200 bg-white dark:divide-zinc-800 dark:bg-zinc-950">
+                          {stat.keys.map((row) => {
+                            const url = publicLuggageUrl(row.key);
+                            return (
+                              <tr key={row.key}>
+                                <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-zinc-800 dark:text-zinc-200">
+                                  <span translate="no" title={row.key}>
+                                    {formatLuggageKeyShort(row.key)}
+                                  </span>
+                                </td>
+                                <td className="max-w-[12rem] min-w-0 px-3 py-2 text-zinc-800 dark:text-zinc-200">
+                                  <span className="block truncate break-words" title={row.filename}>
+                                    {row.filename}
+                                  </span>
+                                </td>
+                                <td className="max-w-[10rem] min-w-0 px-3 py-2 text-xs text-zinc-600 dark:text-zinc-400">
+                                  <span className="block truncate" translate="no">
+                                    {row.mimeType || '—'}
+                                  </span>
+                                </td>
+                                <td className="whitespace-nowrap px-3 py-2 tabular-nums text-zinc-800 dark:text-zinc-200">
+                                  {formatBytes(row.fileSize)}
+                                </td>
+                                <td
+                                  className="whitespace-nowrap px-3 py-2 tabular-nums text-zinc-800 dark:text-zinc-200"
+                                  title={row.expiresAt ? row.expiresAt : undefined}
+                                >
+                                  {formatExpiryAt(row.expiresAt, expiryDateFmt)}
+                                </td>
+                                <td className="whitespace-nowrap px-3 py-2 tabular-nums text-zinc-800 dark:text-zinc-200">
+                                  {nfCount.format(row.activeRefs)}
+                                </td>
+                                <td className="whitespace-nowrap px-3 py-2 tabular-nums text-zinc-800 dark:text-zinc-200" translate="no">
+                                  {nfCount.format(row.ownerUserId)}
+                                </td>
+                                <td className="px-3 py-2">
+                                  <div className="flex flex-nowrap gap-2">
+                                    <a
+                                      href={`${url}?download=true`}
+                                      className="inline-flex rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs font-medium text-zinc-800 transition hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800"
+                                    >
+                                      Download
+                                    </a>
+                                    <CopyLinkButton url={url} />
+                                    <button
+                                      type="button"
+                                      className="rounded-md border border-red-200 bg-red-50 px-2 py-1 text-xs font-semibold text-red-800 transition hover:bg-red-100 dark:border-red-900/60 dark:bg-red-950/50 dark:text-red-100 dark:hover:bg-red-950"
+                                      onClick={() => openDelete(row)}
+                                    >
+                                      Delete…
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </section>
+              </>
+            )}
+
+            {activePage === 'settings' && (
+              <>
+                <section className="rounded-lg border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900" aria-labelledby="api-keys-heading">
               <h2 id="api-keys-heading" className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
-                API keys
+                API Keys
               </h2>
               <p className="mt-2 max-w-xl text-sm text-zinc-600 dark:text-zinc-400">
                 Create keys to call protected endpoints from curl, CI, or other apps with{' '}
@@ -668,10 +827,11 @@ export default function App() {
                   </label>
                   <input
                     id="api-key-label"
+                    name="api-key-label"
                     type="text"
                     spellCheck={false}
                     autoComplete="off"
-                    placeholder="e.g. laptop, CI"
+                    placeholder="e.g. laptop, CI…"
                     className="mt-1 w-full min-w-0 rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 shadow-sm dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
                     value={apiKeyLabel}
                     onChange={(e) => setApiKeyLabel(e.target.value)}
@@ -684,7 +844,7 @@ export default function App() {
                   disabled={createKeyBusy}
                   onClick={() => void onCreateApiKey()}
                 >
-                  {createKeyBusy ? 'Creating…' : 'Create key'}
+                  {createKeyBusy ? 'Creating…' : 'Create Key'}
                 </button>
               </div>
               {apiKeys.length === 0 ? (
@@ -742,158 +902,53 @@ export default function App() {
                   </table>
                 </div>
               )}
-            </section>
+                </section>
 
-            {adminUsers !== null && (
-              <section className="rounded-lg border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900" aria-labelledby="admin-users-heading">
-                <h2 id="admin-users-heading" className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
-                  Users &amp; quotas
-                </h2>
-                <p className="mt-2 max-w-2xl text-sm text-zinc-600 dark:text-zinc-400">
-                  Per-user limits: total stored size (pool), largest single upload, and uploads per UTC day. Effective per-file
-                  limit is the smaller of the global server cap and the user&apos;s single-file quota. Defaults for new users:
-                  100&nbsp;MiB pool, 10&nbsp;MiB per file, 10 uploads/day.
-                </p>
-                <div className="mt-4 overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
-                  <table className="min-w-full divide-y divide-zinc-200 text-left text-sm dark:divide-zinc-800">
-                    <thead className="bg-zinc-50 dark:bg-zinc-900/80">
-                      <tr>
-                        <th scope="col" className="px-3 py-2 font-medium text-zinc-700 dark:text-zinc-300">
-                          Email
-                        </th>
-                        <th scope="col" className="px-3 py-2 font-medium text-zinc-700 dark:text-zinc-300">
-                          Role
-                        </th>
-                        <th scope="col" className="px-3 py-2 font-medium text-zinc-700 dark:text-zinc-300">
-                          Pool (MiB)
-                        </th>
-                        <th scope="col" className="px-3 py-2 font-medium text-zinc-700 dark:text-zinc-300">
-                          Max file (MiB)
-                        </th>
-                        <th scope="col" className="px-3 py-2 font-medium text-zinc-700 dark:text-zinc-300">
-                          Daily uploads
-                        </th>
-                        <th scope="col" className="px-3 py-2 font-medium text-zinc-700 dark:text-zinc-300">
-                          Actions
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-zinc-200 bg-white dark:divide-zinc-800 dark:bg-zinc-950">
-                      {adminUsers.map((row) => (
-                        <AdminUserQuotaRow key={row.id} u={row} onSaved={load} />
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </section>
-            )}
-
-            <section aria-labelledby="files-heading">
-              <div className="flex flex-wrap items-end justify-between gap-3">
-                <h2 id="files-heading" className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
-                  Your Luggage
-                </h2>
-                <p className="text-sm tabular-nums text-zinc-600 dark:text-zinc-400">
-                  {nfCount.format(stat.totalKeys)} files · {formatBytes(stat.totalSize)} total
-                </p>
-              </div>
-
-              {stat.keys.length === 0 ? (
-                <p className="mt-4 rounded-lg border border-dashed border-zinc-300 bg-zinc-50 px-4 py-8 text-center text-sm text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900/40 dark:text-zinc-400">
-                  No files yet… Upload above to add your first object.
-                </p>
-              ) : (
-                <div className="mt-4 overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
-                  <table className="min-w-full divide-y divide-zinc-200 text-left text-sm dark:divide-zinc-800">
-                    <thead className="bg-zinc-50 dark:bg-zinc-900/80">
-                      <tr>
-                        <th scope="col" className="px-3 py-2 font-medium text-zinc-700 dark:text-zinc-300">
-                          Key
-                        </th>
-                        <th scope="col" className="px-3 py-2 font-medium text-zinc-700 dark:text-zinc-300">
-                          Name
-                        </th>
-                        <th scope="col" className="px-3 py-2 font-medium text-zinc-700 dark:text-zinc-300">
-                          MIME
-                        </th>
-                        <th scope="col" className="px-3 py-2 font-medium text-zinc-700 dark:text-zinc-300">
-                          Size
-                        </th>
-                        <th scope="col" className="px-3 py-2 font-medium text-zinc-700 dark:text-zinc-300">
-                          Expires
-                        </th>
-                        <th scope="col" className="px-3 py-2 font-medium text-zinc-700 dark:text-zinc-300">
-                          Active Refs
-                        </th>
-                        <th scope="col" className="px-3 py-2 font-medium text-zinc-700 dark:text-zinc-300">
-                          Owner ID
-                        </th>
-                        <th scope="col" className="px-3 py-2 font-medium text-zinc-700 dark:text-zinc-300">
-                          Actions
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-zinc-200 bg-white dark:divide-zinc-800 dark:bg-zinc-950">
-                      {stat.keys.map((row) => {
-                        const url = publicLuggageUrl(row.key);
-                        return (
-                          <tr key={row.key}>
-                            <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-zinc-800 dark:text-zinc-200">
-                              <span translate="no" title={row.key}>
-                                {formatLuggageKeyShort(row.key)}
-                              </span>
-                            </td>
-                            <td className="max-w-[12rem] min-w-0 px-3 py-2 text-zinc-800 dark:text-zinc-200">
-                              <span className="block truncate break-words" title={row.filename}>
-                                {row.filename}
-                              </span>
-                            </td>
-                            <td className="max-w-[10rem] min-w-0 px-3 py-2 text-xs text-zinc-600 dark:text-zinc-400">
-                              <span className="block truncate" translate="no">
-                                {row.mimeType || '—'}
-                              </span>
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-2 tabular-nums text-zinc-800 dark:text-zinc-200">
-                              {formatBytes(row.fileSize)}
-                            </td>
-                            <td
-                              className="whitespace-nowrap px-3 py-2 tabular-nums text-zinc-800 dark:text-zinc-200"
-                              title={row.expiresAt ? row.expiresAt : undefined}
-                            >
-                              {formatExpiryAt(row.expiresAt, expiryDateFmt)}
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-2 tabular-nums text-zinc-800 dark:text-zinc-200">
-                              {nfCount.format(row.activeRefs)}
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-2 tabular-nums text-zinc-800 dark:text-zinc-200" translate="no">
-                              {nfCount.format(row.ownerUserId)}
-                            </td>
-                            <td className="px-3 py-2">
-                              <div className="flex flex-nowrap gap-2">
-                                <a
-                                  href={`${url}?download=true`}
-                                  className="inline-flex rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs font-medium text-zinc-800 transition hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800"
-                                >
-                                  Download
-                                </a>
-                                <CopyLinkButton url={url} />
-                                <button
-                                  type="button"
-                                  className="rounded-md border border-red-200 bg-red-50 px-2 py-1 text-xs font-semibold text-red-800 transition hover:bg-red-100 dark:border-red-900/60 dark:bg-red-950/50 dark:text-red-100 dark:hover:bg-red-950"
-                                  onClick={() => openDelete(row)}
-                                >
-                                  Delete…
-                                </button>
-                              </div>
-                            </td>
+                {adminUsers !== null && (
+                  <section className="rounded-lg border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900" aria-labelledby="admin-users-heading">
+                    <h2 id="admin-users-heading" className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
+                      Users &amp; quotas
+                    </h2>
+                    <p className="mt-2 max-w-2xl text-sm text-zinc-600 dark:text-zinc-400">
+                      Per-user limits: total stored size (pool), largest single upload, and uploads per UTC day. Effective per-file
+                      limit is the smaller of the global server cap and the user&apos;s single-file quota. Defaults for new users:
+                      100&nbsp;MiB pool, 10&nbsp;MiB per file, 10 uploads/day.
+                    </p>
+                    <div className="mt-4 overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
+                      <table className="min-w-full divide-y divide-zinc-200 text-left text-sm dark:divide-zinc-800">
+                        <thead className="bg-zinc-50 dark:bg-zinc-900/80">
+                          <tr>
+                            <th scope="col" className="px-3 py-2 font-medium text-zinc-700 dark:text-zinc-300">
+                              Email
+                            </th>
+                            <th scope="col" className="px-3 py-2 font-medium text-zinc-700 dark:text-zinc-300">
+                              Role
+                            </th>
+                            <th scope="col" className="px-3 py-2 font-medium text-zinc-700 dark:text-zinc-300">
+                              Pool (MiB)
+                            </th>
+                            <th scope="col" className="px-3 py-2 font-medium text-zinc-700 dark:text-zinc-300">
+                              Max file (MiB)
+                            </th>
+                            <th scope="col" className="px-3 py-2 font-medium text-zinc-700 dark:text-zinc-300">
+                              Daily uploads
+                            </th>
+                            <th scope="col" className="px-3 py-2 font-medium text-zinc-700 dark:text-zinc-300">
+                              Actions
+                            </th>
                           </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </section>
+                        </thead>
+                        <tbody className="divide-y divide-zinc-200 bg-white dark:divide-zinc-800 dark:bg-zinc-950">
+                          {adminUsers.map((row) => (
+                            <AdminUserQuotaRow key={row.id} u={row} onSaved={load} />
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </section>
+                )}
+              </>
+            )}
           </>
         )}
       </main>
