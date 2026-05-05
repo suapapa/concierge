@@ -93,8 +93,8 @@ info:
     email: ff4500@gmail.com
     name: Homin Lee
     url: https://github.com/suapapa
-  description: A temporary file storage service with TTL support and optional Google
-    OAuth.
+  description: A temporary file storage service with TTL support, PostgreSQL, and
+    Google OAuth.
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
@@ -312,8 +312,7 @@ paths:
       consumes:
       - application/json
       description: Check if the service is healthy by verifying temporary directory
-        access and active refs file readability. When a database is configured, pings
-        PostgreSQL.
+        access, active refs file readability, and PostgreSQL connectivity.
       produces:
       - application/json
       responses:
@@ -506,7 +505,7 @@ paths:
 securityDefinitions:
   BearerAuth:
     description: 'Type "Bearer" followed by a space: legacy admin token file contents,
-      or a per-user key starting with `concierge_` from POST /api-keys (database mode).'
+      or a per-user key starting with `concierge_` from POST /api-keys.'
     in: header
     name: Authorization
     type: apiKey

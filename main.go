@@ -1,6 +1,6 @@
 // @title           Concierge API
 // @version         1.0
-// @description     A temporary file storage service with TTL support and optional Google OAuth.
+// @description     A temporary file storage service with TTL support, PostgreSQL, and Google OAuth.
 
 // @contact.name   Homin Lee
 // @contact.url    https://github.com/suapapa
@@ -15,7 +15,7 @@
 // @securityDefinitions.apikey BearerAuth
 // @in header
 // @name Authorization
-// @description Type "Bearer" followed by a space: legacy admin token file contents, or a per-user key starting with `concierge_` from POST /api-keys (database mode).
+// @description Type "Bearer" followed by a space: legacy admin token file contents, or a per-user key starting with `concierge_` from POST /api-keys.
 
 // @securityDefinitions.apikey SessionCookie
 // @in cookie
@@ -38,10 +38,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/suapapa/concierge/docs"
-	"github.com/suapapa/concierge/internal/activerefs"
 	"github.com/suapapa/concierge/internal/auth"
 	"github.com/suapapa/concierge/internal/config"
 	"github.com/suapapa/concierge/internal/luggage"
+	"github.com/suapapa/concierge/internal/luggagestore"
 	"github.com/suapapa/concierge/internal/staticui"
 	"github.com/suapapa/concierge/internal/store"
 	swaggerfiles "github.com/swaggo/files"
@@ -55,6 +55,9 @@ func main() {
 	flag.StringVar(&cfg.Port, "p", cfg.Port, "listen port")
 	flag.BoolVar(&cfg.Release, "r", cfg.Release, "release mode")
 	flag.StringVar(&cfg.TokenPath, "token", cfg.TokenPath, "path to legacy bearer token file")
+	flag.DurationVar(&cfg.LuggageExpirySweepInterval, "luggage-expiry-sweep-interval", cfg.LuggageExpirySweepInterval, "in-process luggage expiry sweep period (0 disables; env CONCIERGE_LUGGAGE_EXPIRY_SWEEP_INTERVAL overrides)")
+	flag.BoolVar(&cfg.LuggageExpirySweepOnce, "luggage-expiry-sweep-once", cfg.LuggageExpirySweepOnce, "run DB luggage expiry sweeps until drained then exit without HTTP (CronJob)")
+	flag.IntVar(&cfg.LuggageExpirySweepBatch, "luggage-expiry-sweep-batch", cfg.LuggageExpirySweepBatch, "max keys per sweep query")
 	flag.Parse()
 	cfg.ApplyEnv()
 
@@ -71,26 +74,44 @@ func main() {
 	appCtx, stopApp := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopApp()
 
-	refStore := activerefs.NewStore(cfg.ActiveRefs, cfg.LockFile)
-	svc := luggage.NewService(appCtx, cfg.TmpDir, cfg.SizeLimit, refStore)
+	st, err := store.Connect(appCtx, cfg.DatabaseURL)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "database: %v\n", err)
+		os.Exit(1)
+	}
+	defer st.Close()
+	if err := st.Migrate(appCtx); err != nil {
+		fmt.Fprintf(os.Stderr, "migrate: %v\n", err)
+		os.Exit(1)
+	}
+
+	if cfg.LuggageBackfill {
+		n, err := luggagestore.BackfillYAMLToDB(appCtx, st, cfg.TmpDir)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "luggage backfill: %v\n", err)
+			os.Exit(1)
+		}
+		log.Printf("luggage backfill: imported %d objects from info.yaml", n)
+	}
+
+	refDB := st.ActiveRefDB()
+	lmeta := &luggagestore.Meta{Store: st, TmpDir: cfg.TmpDir}
+	svc := luggage.NewService(appCtx, cfg.TmpDir, cfg.SizeLimit, refDB, luggage.WithMetaStore(lmeta))
+
+	if cfg.LuggageExpirySweepOnce {
+		if err := runLuggageExpirySweepOnce(appCtx, svc, cfg.LuggageExpirySweepBatch); err != nil {
+			fmt.Fprintf(os.Stderr, "luggage expiry sweep: %v\n", err)
+			os.Exit(1)
+		}
+		log.Printf("luggage expiry sweep-once: completed")
+		return
+	}
+
+	startLuggageExpirySweepLoop(appCtx, svc, cfg.LuggageExpirySweepInterval, cfg.LuggageExpirySweepBatch)
 
 	legacyToken, err := readBearerToken(cfg.TokenPath)
 	if err != nil {
 		log.Printf("token: %v", err)
-	}
-
-	var st *store.Store
-	if cfg.DatabaseURL != "" {
-		st, err = store.Connect(appCtx, cfg.DatabaseURL)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "database: %v\n", err)
-			os.Exit(1)
-		}
-		defer st.Close()
-		if err := st.Migrate(appCtx); err != nil {
-			fmt.Fprintf(os.Stderr, "migrate: %v\n", err)
-			os.Exit(1)
-		}
 	}
 
 	h := &Handlers{
@@ -106,15 +127,13 @@ func main() {
 	api.GET("/health", h.GetHealth)
 	api.GET("/luggage/:key", h.GetLuggage)
 
-	if st != nil {
-		oauthH, err := auth.NewOAuth(appCtx, &cfg, st)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "oauth: %v\n", err)
-			os.Exit(1)
-		}
-		api.GET("/auth/google", oauthH.Start)
-		api.GET("/auth/google/callback", oauthH.Callback)
+	oauthH, err := auth.NewOAuth(appCtx, &cfg, st)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "oauth: %v\n", err)
+		os.Exit(1)
 	}
+	api.GET("/auth/google", oauthH.Start)
+	api.GET("/auth/google/callback", oauthH.Callback)
 
 	protected := api.Group("")
 	protected.Use(auth.RequireUserOrLegacy(legacyToken, st, st))
@@ -167,6 +186,44 @@ func main() {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("graceful shutdown: %v", err)
 	}
+}
+
+func runLuggageExpirySweepOnce(ctx context.Context, svc *luggage.Service, batch int) error {
+	const maxRounds = 100000
+	for round := 0; round < maxRounds; round++ {
+		examined, _, err := svc.SweepExpired(ctx, time.Now().UTC(), batch)
+		if err != nil {
+			return err
+		}
+		if examined == 0 {
+			return nil
+		}
+	}
+	return fmt.Errorf("exceeded %d sweep rounds without emptying the expired queue", maxRounds)
+}
+
+func startLuggageExpirySweepLoop(ctx context.Context, svc *luggage.Service, interval time.Duration, batch int) {
+	if interval <= 0 {
+		return
+	}
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		run := func() {
+			if _, _, err := svc.SweepExpired(ctx, time.Now().UTC(), batch); err != nil {
+				log.Printf("luggage expiry sweep: %v", err)
+			}
+		}
+		run()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				run()
+			}
+		}
+	}()
 }
 
 func readBearerToken(path string) (string, error) {

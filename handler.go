@@ -21,9 +21,9 @@ import (
 // Handlers wires HTTP entrypoints to the luggage service.
 type Handlers struct {
 	Svc            *luggage.Service
-	Store          *store.Store // nil when CONCIERGE_DATABASE_URL is unset
+	Store          *store.Store // PostgreSQL (required at process startup)
 	CookieSecure   bool         // forwarded from config for auth cookie flags
-	MaxUploadBytes int          // global cap from -l / env; per-user cap is the lesser when DB mode
+	MaxUploadBytes int          // global cap from -l / env; per-user cap is the lesser of this and DB quotas
 }
 
 // CreateAPIKeyResponse is returned from POST /api/v1/api-keys (plaintext secret only once in `key`).
@@ -94,7 +94,7 @@ func (h *Handlers) PostLuggage(c *gin.Context) {
 		}
 		ownerID = uid
 
-		if h.Store != nil && ownerID > 0 {
+		if ownerID > 0 {
 			u, err := h.Store.UserByID(c.Request.Context(), ownerID)
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -114,12 +114,12 @@ func (h *Handlers) PostLuggage(c *gin.Context) {
 			if addBytes <= 0 {
 				addBytes = effectiveSingle
 			}
-			st, err := h.Svc.Stat(c.Request.Context(), luggage.StatOptions{FilterUserID: &ownerID})
+			poolUsed, err := h.Store.SumLuggageBytesByOwner(c.Request.Context(), ownerID)
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 				return
 			}
-			if st.TotalSize+addBytes > u.MaxPoolBytes {
+			if poolUsed+addBytes > u.MaxPoolBytes {
 				c.JSON(http.StatusForbidden, gin.H{"error": "storage pool quota exceeded for your account"})
 				return
 			}
@@ -149,7 +149,7 @@ func (h *Handlers) PostLuggage(c *gin.Context) {
 		MaxPayloadBytes:   maxPayload,
 	})
 	if err != nil {
-		if reservedDaily && h.Store != nil {
+		if reservedDaily {
 			_ = h.Store.ReleaseDailyUpload(context.Background(), ownerID)
 		}
 		switch {
@@ -257,7 +257,7 @@ func (h *Handlers) GetLuggage(c *gin.Context) {
 
 // GetHealth checks the health status of the service
 // @Summary      Health check
-// @Description  Check if the service is healthy by verifying temporary directory access and active refs file readability. When a database is configured, pings PostgreSQL.
+// @Description  Check if the service is healthy by verifying temporary directory access, active download ref store (PostgreSQL), and database connectivity.
 // @Tags         health
 // @Accept       json
 // @Produce      json
@@ -272,14 +272,12 @@ func (h *Handlers) GetHealth(c *gin.Context) {
 		})
 		return
 	}
-	if h.Store != nil {
-		if err := h.Store.Ping(c.Request.Context()); err != nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{
-				"status": "unhealthy",
-				"error":  "database: " + err.Error(),
-			})
-			return
-		}
+	if err := h.Store.Ping(c.Request.Context()); err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"status": "unhealthy",
+			"error":  "database: " + err.Error(),
+		})
+		return
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"status":    "healthy",
@@ -319,7 +317,7 @@ func (h *Handlers) GetStat(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
-// PostAuthLogout ends the current DB session (no-op for legacy-only clients).
+// PostAuthLogout ends the current DB session (clears cookie even if no session row exists).
 // @Summary      Log out
 // @Description  Deletes the server-side session for the concierge_session cookie.
 // @Tags         auth
@@ -327,10 +325,6 @@ func (h *Handlers) GetStat(c *gin.Context) {
 // @Success      204  "No content"
 // @Router       /auth/logout [post]
 func (h *Handlers) PostAuthLogout(c *gin.Context) {
-	if h.Store == nil {
-		c.Status(http.StatusNoContent)
-		return
-	}
 	rawHex, err := c.Cookie(auth.SessionCookieName())
 	if err != nil || rawHex == "" {
 		c.Status(http.StatusNoContent)
@@ -363,10 +357,6 @@ func (h *Handlers) PostAuthLogout(c *gin.Context) {
 // @Failure      500  {object}  map[string]string
 // @Router       /admin/users [get]
 func (h *Handlers) AdminListUsers(c *gin.Context) {
-	if h.Store == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "database not configured"})
-		return
-	}
 	users, err := h.Store.ListUsers(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -390,10 +380,6 @@ func (h *Handlers) AdminListUsers(c *gin.Context) {
 // @Failure      500   {object}  map[string]string
 // @Router       /admin/users/{id} [patch]
 func (h *Handlers) AdminPatchUser(c *gin.Context) {
-	if h.Store == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "database not configured"})
-		return
-	}
 	idStr := c.Param("id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil || id < 1 {
@@ -483,10 +469,6 @@ func (h *Handlers) AdminPatchUser(c *gin.Context) {
 // @Failure      503  {object}  map[string]string
 // @Router       /api-keys [get]
 func (h *Handlers) GetAPIKeys(c *gin.Context) {
-	if h.Store == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "database not configured"})
-		return
-	}
 	if auth.IsLegacyBearer(c) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
@@ -522,10 +504,6 @@ func (h *Handlers) GetAPIKeys(c *gin.Context) {
 // @Failure      503   {object}  map[string]string
 // @Router       /api-keys [post]
 func (h *Handlers) PostAPIKey(c *gin.Context) {
-	if h.Store == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "database not configured"})
-		return
-	}
 	if auth.IsLegacyBearer(c) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
@@ -575,10 +553,6 @@ func (h *Handlers) PostAPIKey(c *gin.Context) {
 // @Failure      503   {object}  map[string]string
 // @Router       /api-keys/{id} [delete]
 func (h *Handlers) DeleteAPIKey(c *gin.Context) {
-	if h.Store == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "database not configured"})
-		return
-	}
 	if auth.IsLegacyBearer(c) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return

@@ -348,7 +348,7 @@ const docTemplate = `{
         },
         "/health": {
             "get": {
-                "description": "Check if the service is healthy by verifying temporary directory access and active refs file readability. When a database is configured, pings PostgreSQL.",
+                "description": "Check if the service is healthy by verifying temporary directory access, active refs file readability, and PostgreSQL connectivity.",
                 "consumes": [
                     "application/json"
                 ],
@@ -774,7 +774,7 @@ const docTemplate = `{
     },
     "securityDefinitions": {
         "BearerAuth": {
-            "description": "Type \"Bearer\" followed by a space: legacy admin token file contents, or a per-user key starting with ` + "`" + `concierge_` + "`" + ` from POST /api-keys (database mode).",
+            "description": "Type \"Bearer\" followed by a space: legacy admin token file contents, or a per-user key starting with ` + "`" + `concierge_` + "`" + ` from POST /api-keys.",
             "type": "apiKey",
             "name": "Authorization",
             "in": "header"
@@ -795,7 +795,7 @@ var SwaggerInfo = &swag.Spec{
 	BasePath:         "/api/v1",
 	Schemes:          []string{},
 	Title:            "Concierge API",
-	Description:      "A temporary file storage service with TTL support and optional Google OAuth.",
+	Description:      "A temporary file storage service with TTL support, PostgreSQL, and Google OAuth.",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",

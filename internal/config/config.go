@@ -3,7 +3,6 @@ package config
 
 import (
 	"fmt"
-	"path/filepath"
 	"time"
 
 	"github.com/suapapa/concierge/internal/store"
@@ -22,17 +21,17 @@ type Config struct {
 	SizeLimit  int
 	Port       string
 	Release    bool
-	TokenPath  string
-	ActiveRefs string
-	LockFile   string
+	TokenPath string
 
-	// DatabaseURL enables Google OAuth + DB-backed sessions. Empty keeps legacy bearer-only auth for mutating routes.
+	// DatabaseURL is required: PostgreSQL DSN for sessions, API keys, luggage metadata, and quotas.
 	DatabaseURL string
-	// Google OAuth (required when DatabaseURL is set).
+	// LuggageBackfill, when true (e.g. CONCIERGE_LUGGAGE_BACKFILL=1), runs a one-time yaml→DB scan at startup then clears each info.yaml.
+	LuggageBackfill bool
+	// Google OAuth (required).
 	GoogleClientID     string
 	GoogleClientSecret string
 	OAuthRedirectURL   string
-	// SessionSecret is used for future crypto; when DatabaseURL is set it must be at least 16 bytes.
+	// SessionSecret is used for OAuth state signing and cookies; must be at least 16 bytes.
 	SessionSecret string
 	// BootstrapAdminEmails: first-time users with these emails (lowercased) get role admin.
 	BootstrapAdminEmails []string
@@ -44,13 +43,34 @@ type Config struct {
 	// StaticUIDir is the directory with the Vite production bundle (index.html, assets/).
 	// When that index.html exists at startup, GET / and client routes serve the React app.
 	StaticUIDir string
+
+	// LuggageExpirySweepInterval is how often the server runs a DB-driven expiry sweep (0 disables).
+	LuggageExpirySweepInterval time.Duration
+	// LuggageExpirySweepOnce, when true, runs sweep rounds until no expired keys remain then exits (no HTTP; for CronJob).
+	LuggageExpirySweepOnce bool
+	// LuggageExpirySweepBatch caps keys loaded from the database per sweep query / round.
+	LuggageExpirySweepBatch int
 }
 
 // Validate checks required fields and returns an error if the config is unusable.
 func (c *Config) Validate() error {
-	c.DerivePaths()
 	if c.TmpDir == "" {
 		return fmt.Errorf("tmpDir is required")
+	}
+	if c.LuggageExpirySweepOnce {
+		if c.DatabaseURL == "" {
+			return fmt.Errorf("%sDATABASE_URL is required", envPrefix)
+		}
+		if c.LuggageExpirySweepBatch <= 0 {
+			return fmt.Errorf("luggage expiry sweep batch must be positive")
+		}
+		if c.SizeLimit <= 0 {
+			return fmt.Errorf("sizeLimit must be positive")
+		}
+		if c.LuggageExpirySweepInterval < 0 {
+			return fmt.Errorf("luggage expiry sweep interval must not be negative")
+		}
+		return nil
 	}
 	if c.SizeLimit <= 0 {
 		return fmt.Errorf("sizeLimit must be positive")
@@ -58,13 +78,20 @@ func (c *Config) Validate() error {
 	if c.Port == "" {
 		return fmt.Errorf("port is required")
 	}
-	if c.DatabaseURL != "" {
-		if c.GoogleClientID == "" || c.GoogleClientSecret == "" || c.OAuthRedirectURL == "" {
-			return fmt.Errorf("when %sDATABASE_URL is set, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and OAUTH_REDIRECT_URL are required", envPrefix)
-		}
-		if len(c.SessionSecret) < 16 {
-			return fmt.Errorf("when %sDATABASE_URL is set, SESSION_SECRET must be at least 16 characters", envPrefix)
-		}
+	if c.DatabaseURL == "" {
+		return fmt.Errorf("%sDATABASE_URL is required", envPrefix)
+	}
+	if c.LuggageExpirySweepBatch <= 0 {
+		return fmt.Errorf("luggage expiry sweep batch must be positive")
+	}
+	if c.LuggageExpirySweepInterval < 0 {
+		return fmt.Errorf("luggage expiry sweep interval must not be negative")
+	}
+	if c.GoogleClientID == "" || c.GoogleClientSecret == "" || c.OAuthRedirectURL == "" {
+		return fmt.Errorf("%sGOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and OAUTH_REDIRECT_URL are required", envPrefix)
+	}
+	if len(c.SessionSecret) < 16 {
+		return fmt.Errorf("%sSESSION_SECRET must be at least 16 characters", envPrefix)
 	}
 	return nil
 }
@@ -81,12 +108,10 @@ func Default() Config {
 		TokenPath:         defaultTokenPath,
 		SessionTTL:        defaultSessionTTL,
 		PostLoginRedirect: "/",
+		OAuthRedirectURL:  "http://localhost:8080/api/v1/auth/google/callback",
 		StaticUIDir:       "fe/dist",
-	}
-}
 
-// DerivePaths sets ActiveRefs and LockFile from TmpDir. Call after TmpDir is final.
-func (c *Config) DerivePaths() {
-	c.ActiveRefs = filepath.Join(c.TmpDir, "active_refs.yaml")
-	c.LockFile = filepath.Join(c.TmpDir, "active_refs.lock")
+		LuggageExpirySweepInterval: time.Minute,
+		LuggageExpirySweepBatch:    500,
+	}
 }

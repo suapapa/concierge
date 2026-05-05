@@ -1,8 +1,9 @@
 # Local PostgreSQL for Concierge. Prebuilt GHCR images are built on push to
 # `main` and on every git tag push — see .github/workflows/docker-publish.yml.
+# The app binary always requires CONCIERGE_DATABASE_URL (Compose sets it for `concierge`).
 # Start DB only:
 #   docker compose up -d
-# Full stack (requires Google OAuth env in shell or .env):
+# Full stack (requires Google OAuth + session secrets in shell or .env):
 #   docker compose --profile app up --build
 services:
   postgres:

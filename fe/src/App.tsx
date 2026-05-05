@@ -575,8 +575,8 @@ export default function App() {
               Sign In Required
             </h2>
             <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
-              Use Google OAuth on the Concierge server (database mode), or configure a legacy bearer token for API-only
-              access. This UI expects a session cookie after login; you can then create per-user API keys for scripts.
+              Use Google OAuth on the Concierge server (PostgreSQL is required), or configure a legacy bearer token for
+              API-only access. This UI expects a session cookie after login; you can then create per-user API keys for scripts.
             </p>
             <p className="mt-4">
               <a

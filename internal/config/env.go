@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -18,6 +19,9 @@ func (c *Config) ApplyEnv() {
 	}
 	if v := os.Getenv(envPrefix + "DATABASE_URL"); v != "" {
 		c.DatabaseURL = v
+	}
+	if v := os.Getenv(envPrefix + "LUGGAGE_BACKFILL"); v != "" {
+		c.LuggageBackfill = parseTruthyEnv(v)
 	}
 	if v := os.Getenv(envPrefix + "GOOGLE_CLIENT_ID"); v != "" {
 		c.GoogleClientID = v
@@ -48,6 +52,24 @@ func (c *Config) ApplyEnv() {
 	if v := os.Getenv(envPrefix + "STATIC_UI_DIR"); v != "" {
 		c.StaticUIDir = v
 	}
+	if v := os.Getenv(envPrefix + "LUGGAGE_EXPIRY_SWEEP_INTERVAL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			c.LuggageExpirySweepInterval = d
+		}
+	}
+	if v := os.Getenv(envPrefix + "LUGGAGE_EXPIRY_SWEEP_ONCE"); v != "" {
+		c.LuggageExpirySweepOnce = parseTruthyEnv(v)
+	}
+	if v := os.Getenv(envPrefix + "LUGGAGE_EXPIRY_SWEEP_BATCH"); v != "" {
+		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n > 0 {
+			c.LuggageExpirySweepBatch = n
+		}
+	}
+}
+
+func parseTruthyEnv(s string) bool {
+	s = strings.TrimSpace(strings.ToLower(s))
+	return s == "1" || s == "true" || s == "yes"
 }
 
 func parseEmailList(s string) []string {

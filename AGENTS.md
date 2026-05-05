@@ -13,9 +13,13 @@ If only one file seems affected (e.g. a new flag), still check the other for sta
 
 ## What this is
 
-**Concierge** is a small Gin HTTP service for temporary file hosting: uploads go under a configurable temp directory with per-object TTL, YAML sidecar metadata (`info.yaml`, including `ownerUserId` when authenticated, `expiresAt` RFC3339Nano UTC set on new uploads), and a file-backed active reference map so objects are not deleted while downloads are in progress.
+**Concierge** is a small Gin HTTP service for temporary file hosting: uploads go under a configurable temp directory with per-object TTL recorded as **`luggage_objects.expires_at`**, **PostgreSQL** for sessions/metadata/quotas, and a **`luggage_active_refs`** table for in-flight download counts so multiple instances agree when expiry cleanup may remove an object. **Expiry cleanup** is DB-driven: a periodic sweep (optional interval `0` to disable in-process) selects expired keys and removes disk + refs + metadata when ref count is zero; **`CONCIERGE_LUGGAGE_EXPIRY_SWEEP_ONCE` / `-luggage-expiry-sweep-once`** runs sweeps until drained then exits with no HTTP server (Kubernetes CronJob).
 
-With **`CONCIERGE_DATABASE_URL`** set, the service adds **Google OAuth**, **PostgreSQL** (`users`, `sessions`, `api_keys`, `user_daily_uploads` for quota counters), **opaque session cookies** (`concierge_session`), **per-user API keys** (`concierge_…` bearer secrets, stored hashed), **roles** (`admin` / `guest`), and **per-user upload quotas** on `users` (pool size, single-file max, daily upload count; UTC day). Downloads `GET /api/v1/luggage/:key` remain public for anyone with the key.
+**`CONCIERGE_DATABASE_URL`** is required at startup (connect or migrate failure exits the process). The database holds **Google OAuth** configuration-backed flows, **`users`**, **`sessions`**, **`api_keys`**, **`user_daily_uploads`** (daily upload counters), **`luggage_objects`** (per-key metadata: owner, filename, MIME type, payload size, `expires_at` RFC3339Nano UTC), **`luggage_active_refs`** (per-key download ref counts; FK to `luggage_objects` with `ON DELETE CASCADE`), **opaque session cookies** (`concierge_session`), **per-user API keys** (`concierge_…` bearer secrets, stored hashed), **roles** (`admin` / `guest`), and **per-user upload quotas** on `users` (pool size, single-file max, daily upload count; UTC day). Payload bytes live on disk at `TMP_DIR/<key>/<filename>`; production does **not** write `info.yaml` (unit tests may still use yaml when `MetaStore` is nil).
+
+**`CONCIERGE_LUGGAGE_BACKFILL=1`**: one-shot at startup — scan `TMP_DIR` for legacy `info.yaml`, upsert into `luggage_objects`, delete each yaml file; then unset the variable.
+
+Downloads `GET /api/v1/luggage/:key` remain public for anyone with the key.
 
 Module path: `github.com/suapapa/concierge`.
 
@@ -23,18 +27,19 @@ Module path: `github.com/suapapa/concierge`.
 
 | Path | Role |
 |------|------|
-| `main.go` | Process entry: flags, `config.ApplyEnv()`, signal-aware root `context`, HTTP routes: public `GET /luggage/:key`, OAuth, protected group (session, `Bearer concierge_…` API key, or legacy Bearer), `GET/POST/DELETE /api-keys`, admin group (`GET/PATCH /admin/users`), Swagger in non-release mode |
-| `handler.go` | Gin handlers on `Handlers`; authz for delete/stat; upload quota checks (DB users); admin user/quota APIs |
+| `main.go` | Process entry: flags, `config.ApplyEnv()`, signal-aware root `context`, **always** `store.Connect` + `Migrate`, optional luggage yaml→DB backfill, `store.ActiveRefDB()` + `luggagestore.Meta` wired into `luggage.NewService`, optional **luggage expiry sweep loop** (interval `>0`) or **`-luggage-expiry-sweep-once`** then exit; otherwise HTTP routes: public `GET /luggage/:key`, OAuth, protected group (session, `Bearer concierge_…` API key, or legacy Bearer), `GET/POST/DELETE /api-keys`, admin group (`GET/PATCH /admin/users`), Swagger in non-release mode |
+| `handler.go` | Gin handlers on `Handlers`; authz for delete/stat; upload pool quota via `SumLuggageBytesByOwner`; admin user/quota APIs |
 | `internal/staticui` | Serves Vite `fe/dist` at `/` and `/assets`; `NoRoute` SPA fallback (skips `/api/…`, `/swagger…`, `/docs` in dev) |
 | `fe/` | Vite + React + TypeScript dashboard: `GET /api/v1/stat`, upload, delete, API key UI, copy public URLs, admin “Users & quotas” when `GET /admin/users` succeeds; `npm run dev` proxies `/api` to Concierge (see `fe/.env.example`) |
 | `fe/public/` | Root static assets (favicon, Apple touch icon); Vite copies into `fe/dist` on build (`index.html` links them under `/`) |
 | `internal/config` | `Config`, flags, `ApplyEnv()` for `CONCIERGE_*` variables |
-| `internal/store` | PostgreSQL pool, embedded migrations, user/session/API-key CRUD, `LookupAPIKey`, per-user quotas + daily upload reservation |
+| `internal/store` | PostgreSQL pool, embedded migrations, user/session/API-key CRUD, `LookupAPIKey`, per-user quotas + daily upload reservation, **`luggage_objects`** CRUD/list/sum/`ListLuggageKeysExpiredBefore`, index on **`expires_at`**, **`ActiveRefDB`** (`luggage_active_refs` increment/decrement/read) |
+| `internal/luggagestore` | `Meta` implements `luggage.MetaStore` (Put/Get/Delete/List); **`BackfillYAMLToDB`** for legacy sidecars |
 | `internal/auth` | Google OAuth start/callback, signed OAuth state (HMAC + `SESSION_SECRET`), `RequireUserOrLegacy` (legacy Bearer → API key → session) / `RequireAdmin` |
-| `internal/activerefs` | Advisory lock + YAML persistence for per-key download counts |
-| `internal/luggage` | Core behavior: upload (with owner), `ReadFileInfo`, `Delete`, open/get lease, stats (optional owner filter), health, TTL expiry goroutines tied to app `context` |
+| `internal/activerefs` | File-backed `ActiveRefKeeper` for **unit tests** only (YAML + flock); production uses **`store.ActiveRefDB`** |
+| `internal/luggage` | Core behavior: upload (with owner), `ReadFileInfo`, `Delete`, open/get lease, stats (optional owner filter), health, **`SweepExpired`** (DB `expires_at` + disk + refs + meta); **`ActiveRefKeeper`** + optional **`MetaStore`** (production: PostgreSQL via `internal/luggagestore` + `store.ActiveRefDB`). Without `MetaStore`, automatic expiry via sweep is a no-op (tests use `tryExpire` directly or yaml-only dirs). |
 | `docs/` | Generated Swagger (`swag`); do not hand-edit `docs/docs.go` |
-| `docker-compose.yml` | Local **PostgreSQL**; optional **`concierge`** service via `--profile app`. Compose reads repo-root **`.env`** for `${CONCIERGE_*}` interpolation (or **`docker compose --env-file …`**); copy **`.env.sample`** to `.env` and fill secrets. Both services use **`restart: unless-stopped`** so they come back after a host reboot unless you stopped them explicitly. |
+| `docker-compose.yml` | Local **PostgreSQL**; optional **`concierge`** service via `--profile app` (sets **`CONCIERGE_DATABASE_URL`**). Compose reads repo-root **`.env`** for `${CONCIERGE_*}` interpolation (or **`docker compose --env-file …`**); copy **`.env.sample`** to `.env` and fill secrets. Both services use **`restart: unless-stopped`** so they come back after a host reboot unless you stopped them explicitly. |
 | `.github/workflows/docker-publish.yml` | On **push to `main`** or **any git tag**, **Buildx** + **QEMU** publish a **multi-arch** image (**`linux/amd64`**, **`linux/arm64`**) from the root **`Dockerfile`** to **`ghcr.io/<owner>/<repo>`** with tags **`latest`** (default branch only), **`main`**, **`sha-<commit>`**, and the **git tag name** when applicable (**`GITHUB_TOKEN`**). |
 
 New application logic belongs under `internal/`; keep `main` and handlers as wiring unless there is a strong reason to grow them.
@@ -64,15 +69,15 @@ make swagger
 - **Context**: Blocking/domain boundaries accept `context.Context`; background work uses the process-level context cancelled on SIGINT/SIGTERM.
 - **Errors**: Prefer sentinel errors in `internal/luggage` (e.g. `ErrNotFound`) and `errors.Is` in handlers for HTTP status mapping. Wrap with `%w` where appropriate.
 - **Keys**: Luggage keys are restricted to safe characters (alphanumeric, `_`, `-`); reject path segments and `..`.
-- **Concurrency**: TTL cleanup goroutines must respect cancellation; do not spawn unbounded goroutines without a clear shutdown path.
+- **Concurrency**: Background luggage expiry **sweep** goroutine (when enabled) must respect process `context` cancellation; do not spawn unbounded goroutines without a clear shutdown path.
 - **Docker**: Multi-stage build runs `npm ci` + `npm run build` in `fe/`, copies **`fe/dist`** into the Go builder, then the runtime image ships the binary and **`fe/dist`**. The container starts as **root** only for **`docker-entrypoint.sh`**, which `mkdir -p` + `chown`s **`CONCIERGE_TMP_DIR`** (default `/app/concierge_archive`) so named/bind volumes are writable by **`appuser`**, then **`su-exec`** runs **`./concierge`**. `GET /` serves the React bundle when `fe/dist/index.html` exists. The Go builder still runs `swag init ... --parseInternal`; adding packages only under `internal/` does not require Dockerfile path tweaks beyond the `fe` stage if `fe/` dependencies change.
 
 ## Configuration surface
 
-- CLI flags: `-t` temp dir, `-l` max upload bytes (default equals `internal/store.DefaultMaxSingleFileBytes`, 10 MiB, so it does not undercut new-user DB single-file quotas; tighten with `-l` for a lower global ceiling), `-p` port, `-r` release mode, `-token` legacy bearer token file path (see `main.go` / README).
-- Environment: `CONCIERGE_*` — see `internal/config/env.go`, `.env.sample`, and README (Compose quick start) for `DATABASE_URL`, Google OAuth, `SESSION_SECRET`, `BOOTSTRAP_ADMIN_EMAILS`, `SESSION_TTL`, `POST_LOGIN_REDIRECT`, `COOKIE_SECURE`, `STATIC_UI_DIR`, `TMP_DIR`, `TOKEN_PATH`.
-- **Legacy bearer token**: optional file at `-token` / `TokenPath` default `/secret/token`. When present, its value is matched first against `Authorization: Bearer …` and, if it matches, the request is treated as **admin** (user id 0 for uploads). In DB mode, non-matching `Bearer` values starting with `concierge_` are looked up as **user API keys** (role from `users.role`); otherwise the **session cookie** is used. Missing or empty token file means no legacy token.
-- **Migrations**: Embedded SQL under `internal/store/migrations`; `Store.Migrate` runs on startup when the database is enabled. Migrations use `IF NOT EXISTS` so they are safe to re-run.
+- CLI flags: `-t` temp dir, `-l` max upload bytes (default equals `internal/store.DefaultMaxSingleFileBytes`, 10 MiB, so it does not undercut new-user DB single-file quotas; tighten with `-l` for a lower global ceiling), `-p` port, `-r` release mode, `-token` legacy bearer token file path, **`-luggage-expiry-sweep-interval`** (default `1m`, `0` disables in-process periodic sweep), **`-luggage-expiry-sweep-once`** (sweep until no expired rows then exit; no HTTP; minimal validate: DB + tmp + size limit), **`-luggage-expiry-sweep-batch`** (default `500`, max keys per DB query) (see `main.go` / README).
+- Environment: `CONCIERGE_*` — see `internal/config/env.go`, `.env.sample`, and README (Compose quick start) for **`DATABASE_URL` (required)**, Google OAuth, `SESSION_SECRET`, **`LUGGAGE_BACKFILL`** (one-shot yaml import), **`LUGGAGE_EXPIRY_SWEEP_INTERVAL`**, **`LUGGAGE_EXPIRY_SWEEP_ONCE`**, **`LUGGAGE_EXPIRY_SWEEP_BATCH`**, `BOOTSTRAP_ADMIN_EMAILS`, `SESSION_TTL`, `POST_LOGIN_REDIRECT`, `COOKIE_SECURE`, `STATIC_UI_DIR`, `TMP_DIR`, `TOKEN_PATH`.
+- **Legacy bearer token**: optional file at `-token` / `TokenPath` default `/secret/token`. When present, its value is matched first against `Authorization: Bearer …` and, if it matches, the request is treated as **admin** (user id 0 for uploads). Non-matching `Bearer` values starting with `concierge_` are looked up as **user API keys** (role from `users.role`); otherwise the **session cookie** is used. Missing or empty token file means no legacy token.
+- **Migrations**: Embedded SQL under `internal/store/migrations`; `Store.Migrate` runs on every startup. Migrations use `IF NOT EXISTS` so they are safe to re-run.
 
 ## Skills / deeper Go guidance
 
